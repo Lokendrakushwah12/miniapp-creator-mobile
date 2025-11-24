@@ -209,9 +209,10 @@ function HomeContent() {
   };
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [mobileViewMode, setMobileViewMode] = useState<'chat' | 'preview'>('chat');
 
   return (
-    <div className="flex min-h-screen h-screen font-funnel-sans relative bg-white">
+    <div className="flex min-h-screen h-screen font-funnel-sans relative bg-white overflow-hidden">
       {/* Thin Permanent Sidebar */}
       <HoverSidebar
         ref={hoverSidebarRef}
@@ -222,9 +223,9 @@ function HomeContent() {
       />
 
       {/* Main Content - Chat and Preview */}
-      <div className={`flex flex-1 transition-all duration-300 ${isSidebarOpen ? 'ml-0' : 'ml-0'}`}>
+      <div className={`flex flex-1 transition-all duration-300 flex-col md:flex-row overflow-hidden`}>
         {/* Left Section - Chat/Agent */}
-        <section className="w-1/3 border-r border-gray-200 h-screen flex flex-col bg-white overflow-hidden">
+        <section className={`w-full md:w-1/3 border-r border-gray-200 h-full flex flex-col bg-white overflow-hidden ${mobileViewMode === 'preview' ? 'hidden md:flex' : 'flex'}`}>
           {/* User Profile Header - positioned above chat only */}
           <UserProfileHeader 
             onOpenSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
@@ -239,19 +240,95 @@ function HomeContent() {
             activeAgent={activeAgent || undefined}
             initialAppType={selectedAppType}
           />
+
+          {/* Mobile Toggle Button */}
+          <div className="md:hidden border-t border-gray-200 bg-white p-3">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMobileViewMode('chat')}
+                className={`flex-1 py-2.5 px-4 rounded-full font-medium text-sm transition-all ${
+                  mobileViewMode === 'chat'
+                    ? 'bg-[#fe6c12] text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  Chat
+                </div>
+              </button>
+              <button
+                onClick={() => setMobileViewMode('preview')}
+                className={`flex-1 py-2.5 px-4 rounded-full font-medium text-sm transition-all ${
+                  mobileViewMode === 'preview'
+                    ? 'bg-[#fe6c12] text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  Preview
+                </div>
+              </button>
+            </div>
+          </div>
         </section>
 
         {/* Right Section - Code/Preview */}
-        <section className="w-2/3 h-screen bg-gray-50 transition-all duration-500">
-          <CodeGenerator
-            currentProject={projectForPreview}
-            isGenerating={isGenerating || (!!currentProject && !projectForPreview)}
-            onOpenSidebar={() => hoverSidebarRef.current?.openSidebar()}
-            activeAgent={activeAgent || undefined}
-            feeModelType={feeModelType}
-            selectedAppType={selectedAppType}
-            onSelectTemplate={handleTemplateSelect}
-          />
+        <section className={`w-full md:w-2/3 h-full bg-gray-50 transition-all duration-500 overflow-hidden flex flex-col ${mobileViewMode === 'chat' ? 'hidden md:flex' : 'flex'}`}>
+          <div className="flex-1 overflow-hidden">
+            <CodeGenerator
+              currentProject={projectForPreview}
+              isGenerating={isGenerating || (!!currentProject && !projectForPreview)}
+              onOpenSidebar={() => hoverSidebarRef.current?.openSidebar()}
+              activeAgent={activeAgent || undefined}
+              feeModelType={feeModelType}
+              selectedAppType={selectedAppType}
+              onSelectTemplate={handleTemplateSelect}
+            />
+          </div>
+          
+          {/* Mobile Toggle Button - Bottom of Preview Section */}
+          <div className="md:hidden border-t border-gray-200 bg-white p-3 flex-shrink-0">
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMobileViewMode('chat')}
+                className={`flex-1 py-2.5 px-4 rounded-full font-medium text-sm transition-all ${
+                  mobileViewMode === 'chat'
+                    ? 'bg-[#fe6c12] text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                  </svg>
+                  Chat
+                </div>
+              </button>
+              <button
+                onClick={() => setMobileViewMode('preview')}
+                className={`flex-1 py-2.5 px-4 rounded-full font-medium text-sm transition-all ${
+                  mobileViewMode === 'preview'
+                    ? 'bg-[#fe6c12] text-white'
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                }`}
+              >
+                <div className="flex items-center justify-center gap-2">
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                  </svg>
+                  Preview
+                </div>
+              </button>
+            </div>
+          </div>
         </section>
       </div>
     </div>

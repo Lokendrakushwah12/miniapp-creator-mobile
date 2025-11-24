@@ -10,6 +10,14 @@ import { useAuthContext } from '../contexts/AuthContext';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useQuery } from '@tanstack/react-query';
 import type { EarnKit } from '@earnkit/earn';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from './ui/dropdown-menu';
+import { CopyIcon, ExternalLinkIcon } from "lucide-react";
 
 interface GeneratedProject {
   projectId: string;
@@ -87,25 +95,6 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
     }
   };
 
-
-  const getLinkIcon = () => (
-    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-    </svg>
-  );
-
-  const getCopyIcon = () => (
-    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-    </svg>
-  );
-
-  const getExternalIcon = () => (
-    <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-    </svg>
-  );
-
   const handleCopyLink = async () => {
     if (!currentProject?.url) return;
     
@@ -127,24 +116,37 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
   return (
     <div className="h-full flex-1 w-full flex flex-col bg-gray-50">
       <div className="sticky top-0 left-0 flex items-center justify-between px-4 py-3 bg-white border-b border-gray-200">
-        {/* Left side - View toggle buttons */}
+        {/* Left side - View mode dropdown */}
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1 bg-gray-100 rounded-lg p-1">
-            {(['code', 'preview'] as const).map((mode) => (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
               <button
-                key={mode}
-                onClick={() => setViewMode(mode)}
-                className={`px-3 py-1.5 rounded-md transition-colors text-sm font-medium flex items-center gap-2 ${viewMode === mode
-                  ? 'bg-black text-white'
-                  : 'text-gray-600 hover:text-black hover:bg-gray-200'
-                  }`}
-                title={`${mode === 'code' ? 'Code' : 'Preview'} view`}
+                className="px-3 py-1.5 rounded-md transition-colors text-sm font-medium flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700"
+                title={`${viewMode === 'code' ? 'Code' : 'Preview'} view`}
               >
-                {getViewModeIcon(mode)}
-                <span className="capitalize">{mode}</span>
+                {getViewModeIcon(viewMode)}
+                <span className="capitalize">{viewMode}</span>
+                <svg 
+                  className="w-4 h-4 text-gray-600" 
+                  fill="none" 
+                  stroke="currentColor" 
+                  viewBox="0 0 24 24"
+                >
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-            ))}
-          </div>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-48">
+              <DropdownMenuRadioGroup value={viewMode} onValueChange={(value) => setViewMode(value as 'code' | 'preview')}>
+                {(['code', 'preview'] as const).map((mode) => (
+                  <DropdownMenuRadioItem key={mode} value={mode} className="flex items-center gap-2">
+                    {getViewModeIcon(mode)}
+                    <span className="capitalize">{mode}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
           
           {/* Reload Preview Button - Only show when in preview mode and project exists */}
           {viewMode === 'preview' && currentProject && (
@@ -170,16 +172,6 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
           {/* Link Display with Actions - Show when project exists */}
           {currentProject?.url && (
             <div className="flex items-center gap-2 bg-gray-100 rounded-lg px-3 py-2">
-              {/* Link Icon */}
-              <div className="text-gray-500">
-                {getLinkIcon()}
-              </div>
-              
-              {/* URL Display */}
-              <div className="text-sm text-gray-700 font-mono max-w-[200px] truncate">
-                {currentProject.url.replace(/^https?:\/\//, '')}
-              </div>
-              
               {/* Action Buttons */}
               <div className="flex items-center gap-1 ml-2">
                 {/* Copy Link Button */}
@@ -192,7 +184,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
                   }`}
                   title="Copy link"
                 >
-                  {getCopyIcon()}
+                  <CopyIcon className="w-4 h-4" />
                 </button>
                 
                 {/* Open in New Tab Button */}
@@ -201,7 +193,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
                   className="p-1.5 rounded-md transition-colors text-gray-600 hover:text-black hover:bg-gray-200"
                   title="Open in new tab"
                 >
-                  {getExternalIcon()}
+                  <ExternalLinkIcon className="w-4 h-4" />
                 </button>
               </div>
             </div>
