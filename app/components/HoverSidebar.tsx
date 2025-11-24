@@ -76,11 +76,25 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
   };
 
   return (
-    <div className={`h-screen bg-white border-r border-gray-200 flex flex-col transition-all duration-300 ${isOpen ? 'w-64' : 'w-0 border-r-0 overflow-hidden'}`}>
+    <>
+      {/* Mobile backdrop */}
       {isOpen && (
-        <>
-          {/* Projects Section */}
-          <div className="flex-1 overflow-y-auto py-4">
+        <div 
+          className="md:hidden fixed inset-0 bg-black/50 z-40 transition-opacity duration-300"
+          onClick={onToggle}
+        />
+      )}
+      
+      {/* Sidebar */}
+      <div className={`fixed md:relative h-screen bg-white border-r border-gray-200 flex flex-col transition-all duration-300 z-50 ${
+        isOpen 
+          ? 'w-64 md:w-64' 
+          : 'w-0 md:w-0 border-r-0 overflow-hidden'
+      }`}>
+        {isOpen && (
+          <>            
+            {/* Projects Section */}
+            <div className="flex-1 overflow-y-auto py-4">
             <div className="flex flex-col items-center gap-3 p-1">
               {/* New Project Button */}
               <button
@@ -131,7 +145,8 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
           </div>
         </>
       )}
-    </div>
+      </div>
+    </>
   );
 });
 

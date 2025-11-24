@@ -334,7 +334,7 @@ export function Preview({
                 <div className="relative">
                   {/* Iframe positioned to show through iPhone's screen area */}
                   <div
-                    className="absolute z-0 overflow-hidden"
+                    className="absolute z-0 px-4 overflow-hidden"
                     style={{
                       left: "4.9%",
                       top: "2.2%",
@@ -379,7 +379,7 @@ export function Preview({
                   {/* iPhone frame overlays with transparent screen area (mask applied internally) */}
                   <Iphone
                     src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-                    className="w-full relative pointer-events-none"
+                    className="w-full max-h-[600px] relative pointer-events-none"
                   />
                 </div>
               ) : (
