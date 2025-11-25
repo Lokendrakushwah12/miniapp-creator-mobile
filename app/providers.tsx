@@ -4,6 +4,7 @@ import { PrivyProvider } from '@privy-io/react-auth';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Toaster } from 'react-hot-toast';
 import { useState } from 'react';
+import { FarcasterSDKInit } from './components/FarcasterSDKInit';
 
 export default function Providers({ children }: { children: React.ReactNode }) {
     const [queryClient] = useState(() => new QueryClient({
@@ -17,6 +18,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
 
     return (
         <QueryClientProvider client={queryClient}>
+            <FarcasterSDKInit />
             <PrivyProvider
                 appId={process.env.NEXT_PUBLIC_PRIVY_APP_ID || ''}
                 clientId={process.env.NEXT_PUBLIC_PRIVY_CLIENT_ID || ''}
