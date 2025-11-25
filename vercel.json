@@ -24,6 +24,13 @@
       ]
     }
   ],
+  "redirects": [
+    {
+      "source": "/.well-known/farcaster.json",
+      "destination": "https://api.farcaster.xyz/miniapps/hosted-manifest/019abc1b-cc98-3940-6b62-b56802c00a72",
+      "permanent": false
+    }
+  ],
   "regions": ["iad1"]
 }
 
