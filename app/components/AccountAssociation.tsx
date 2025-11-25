@@ -47,15 +47,16 @@ export function AccountAssociation({ domain, onSuccess }: AccountAssociationProp
       setResult(signResult);
       onSuccess(signResult);
       console.log('Account association generated:', signResult);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Error signing manifest:', err);
       
-      if (err?.name === 'RejectedByUser') {
+      const error = err as { name?: string; message?: string };
+      if (error?.name === 'RejectedByUser') {
         setError('User rejected the signing request');
-      } else if (err?.name === 'InvalidDomain') {
+      } else if (error?.name === 'InvalidDomain') {
         setError('Invalid domain provided');
       } else {
-        setError(err?.message || 'Failed to sign manifest');
+        setError(error?.message || 'Failed to sign manifest');
       }
     } finally {
       setIsLoading(false);

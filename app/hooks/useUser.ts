@@ -15,8 +15,9 @@ export function useUser() {
       try {
         // Check if we're in a miniapp context
         const context = await sdk.context;
-        setIsMiniApp((context as any).client.platformType === 'miniapp' || false);
-      } catch (error) {
+        const contextWithClient = context as { client?: { platformType?: string } };
+        setIsMiniApp(contextWithClient?.client?.platformType === 'miniapp' || false);
+      } catch {
         // If SDK fails, we're not in a miniapp
         setIsMiniApp(false);
       } finally {
