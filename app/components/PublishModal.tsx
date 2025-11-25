@@ -620,6 +620,32 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                     <li>Deployed to <code className="bg-gray-200 px-1 rounded">/.well-known/farcaster.json</code></li>
                                 </ul>
                             </div>
+
+                            <div className="mt-4 bg-yellow-50 border border-yellow-200 rounded-lg p-4 w-full">
+                                <p className="text-sm text-yellow-800 mb-2">
+                                    <strong>🚀 Next Step: Submit to Farcaster Registry</strong>
+                                </p>
+                                <p className="text-sm text-yellow-800 mb-3">
+                                    After adding account association, you need to submit your app to Farcaster&apos;s registry to make it discoverable.
+                                </p>
+                                <ol className="text-sm text-yellow-800 space-y-2 list-decimal list-inside mb-3">
+                                    <li>Complete the account association step (Step 4)</li>
+                                    <li>Visit <a href="https://farcaster.xyz/~/developers/mini-apps/registry" target="_blank" rel="noopener noreferrer" className="underline font-medium">Farcaster Registry</a></li>
+                                    <li>Submit your manifest URL: <code className="bg-yellow-100 px-1 rounded">{manifestUrl || 'Your manifest URL'}</code></li>
+                                    <li>Wait for approval (usually takes a few days)</li>
+                                </ol>
+                                <a
+                                    href="https://farcaster.xyz/~/developers/mini-apps/registry"
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm font-medium"
+                                >
+                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+                                    </svg>
+                                    Submit to Farcaster Registry
+                                </a>
+                            </div>
                         </div>
                     )}
 
