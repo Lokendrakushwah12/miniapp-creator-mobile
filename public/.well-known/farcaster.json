@@ -1,0 +1,27 @@
+{
+    "frame": {
+      "name": "my temp app",
+      "version": "1",
+      "iconUrl": "https://github.com/evilrabbit.png",
+      "homeUrl": "https://minidev.fun",
+      "subtitle": "my subtitle",
+      "description": "my description",
+      "primaryCategory": "social",
+      "screenshotUrls": [
+        "https://github.com/evilrabbit.png"
+      ],
+      "imageUrl": "https://github.com/evilrabbit.png",
+      "heroImageUrl": "https://github.com/evilrabbit.png",
+      "splashImageUrl": "https://github.com/evilrabbit.png",
+      "splashBackgroundColor": "#ffffff",
+      "tags": [
+        "social",
+        "messaging"
+      ],
+      "buttonTitle": "open mini app",
+      "ogTitle": "appname - localfirst news",
+      "ogDescription": "Social Share Description",
+      "ogImageUrl": "https://github.com/evilrabbit.png",
+      "castShareUrl": "https://warpcast.com/~/compose?text=Check+out+this+app"
+    }
+  }

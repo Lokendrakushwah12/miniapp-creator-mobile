@@ -4,6 +4,7 @@ import { logger } from "../../lib/logger";
 
 import { useState } from 'react';
 import { useAuthContext } from '../contexts/AuthContext';
+import { AccountAssociation } from './AccountAssociation';
 
 interface PublishModalProps {
     isOpen: boolean;
@@ -82,37 +83,20 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
         }
     };
 
-    // Handle updating account association
-    const handleUpdateAccountAssociation = async () => {
-        if (!accountAssociationJson.trim()) {
-            setError('Please paste the accountAssociation JSON');
-            return;
-        }
-
+    // Handle account association success from AccountAssociation component
+    const handleAccountAssociationSuccess = async (result: { header: string; payload: string; signature: string }) => {
         setIsLoading(true);
         setError(null);
         setVerificationSuccess(null);
 
         try {
-            let parsed = JSON.parse(accountAssociationJson);
-            
-            // Handle both formats: with or without outer accountAssociation wrapper
-            if (parsed.accountAssociation) {
-                parsed = parsed.accountAssociation;
-            }
-            
-            // Validate accountAssociation structure
-            if (!parsed.header || !parsed.payload || !parsed.signature) {
-                throw new Error('Invalid accountAssociation format. Must contain header, payload, and signature.');
-            }
-
             if (!projectId) {
                 throw new Error('Project ID is missing');
             }
 
             // Update the manifest with new account association
             const currentManifest = JSON.parse(manifestJson);
-            currentManifest.accountAssociation = parsed;
+            currentManifest.accountAssociation = result;
 
             const response = await fetch('/api/publish', {
                 method: 'POST',
@@ -133,7 +117,6 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
 
             await response.json();
             setVerificationSuccess('✅ Account association updated successfully! Your app is now linked to your Farcaster account.');
-            setAccountAssociationJson('');
         } catch (err) {
             logger.error('Account association update error:', err);
             const errorMessage = err instanceof Error ? err.message : 'Failed to update account association';
@@ -310,7 +293,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-xl">
+            <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-xl flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">
                     <div>
@@ -369,7 +352,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                 </div>
 
                 {/* Content */}
-                <div className="p-6 overflow-y-auto max-h-[60vh]">
+                <div className="p-6 overflow-y-auto flex-1">
                     {/* Step 1: App Details Form */}
                     {currentStep === 1 && (
                         <div className="space-y-4">
@@ -640,7 +623,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                         </div>
                     )}
 
-                    {/* Step 4: Verification & Troubleshooting */}
+                    {/* Step 4: Account Association */}
                     {currentStep === 4 && (
                         <div className="space-y-4">
                             <div className="flex flex-col items-center justify-center py-4">
@@ -651,9 +634,10 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                 </div>
                                 <h3 className="text-2xl font-semibold text-black mb-2">Add Account Association</h3>
                                 <p className="text-gray-600 text-center mb-6">
-                                    Generate and paste your Farcaster account association to complete setup
+                                    Generate your Farcaster account association to complete setup
                                 </p>
                             </div>
+                            
                             {error && (
                                 <div className="bg-red-50 border border-red-200 rounded-lg p-4">
                                     <p className="text-sm text-red-800">{error}</p>
@@ -665,101 +649,80 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                     <p className="text-sm text-green-800">{verificationSuccess}</p>
                                 </div>
                             )}
-                            {/* Domain Display for Verification */}
+
+                            {/* Account Association Component */}
+                            <AccountAssociation 
+                                domain={getDomain() || projectUrl || ''}
+                                onSuccess={handleAccountAssociationSuccess}
+                            />
+
+                            {/* Fallback: Manual paste option */}
                             <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-                                <label className="block text-sm font-medium text-gray-700 mb-2">
-                                    Your Domain
-                                </label>
-                                <div className="flex items-center gap-2">
-                                    <code className="flex-1 text-sm text-gray-800 bg-white p-2 rounded border border-gray-300 break-all">
-                                        {getDomain() || 'your-domain.com'}
-                                    </code>
-                                    <button
-                                        onClick={() => {
-                                            navigator.clipboard.writeText(getDomain());
-                                        }}
-                                        className="p-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition-colors"
-                                        title="Copy domain"
-                                    >
-                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                                        </svg>
-                                    </button>
-                                </div>
-                                <p className="text-xs text-gray-500 mt-1">
-                                    Use this domain to verify your app on Farcaster
+                                <h4 className="text-sm font-semibold text-gray-900 mb-2">
+                                    Alternative: Manual Paste
+                                </h4>
+                                <p className="text-xs text-gray-600 mb-3">
+                                    If you prefer to generate the account association elsewhere, you can paste it here:
                                 </p>
-                            </div>
+                                <textarea
+                                    placeholder='{"header":"...","payload":"...","signature":"..."}'
+                                    value={accountAssociationJson}
+                                    onChange={(e) => {
+                                        setAccountAssociationJson(e.target.value);
+                                        setError(null);
+                                        setVerificationSuccess(null);
+                                    }}
+                                    rows={4}
+                                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-black focus:border-transparent text-black font-mono text-xs bg-white mb-3"
+                                />
+                                <button
+                                    onClick={async () => {
+                                        if (!accountAssociationJson.trim()) {
+                                            setError('Please paste the accountAssociation JSON');
+                                            return;
+                                        }
 
-                            {/* Account Association Instructions */}
-                            <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                                <div className="flex items-start gap-3">
-                                    <svg className="w-6 h-6 text-blue-600 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                    </svg>
-                                    <div className="flex-1">
-                                        <h3 className="text-sm font-semibold text-blue-900 mb-2">
-                                            Generate Your Account Association
-                                        </h3>
-                                        <ol className="list-decimal list-inside space-y-1 pl-2 text-sm text-blue-900 mb-3">
-                                            <li>Click the button below to open the Farcaster manifest page</li>
-                                            <li>Click <strong>Generate account association</strong> and sign</li>
-                                            <li>Copy the entire <code className="bg-blue-100 px-1 rounded">accountAssociation</code> JSON object</li>
-                                            <li>Paste it below and click <strong>Update Account Association</strong></li>
-                                        </ol>
+                                        setIsLoading(true);
+                                        setError(null);
+                                        setVerificationSuccess(null);
 
-                                        <a
-                                            href="https://farcaster.xyz/~/developers/mini-apps/manifest"
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                            </svg>
-                                            Verify on Farcaster
-                                        </a>
-
-                                        <div className="mt-4">
-                                            <label className="block text-sm font-medium text-blue-900 mb-2">
-                                                Paste Account Association JSON <span className="text-red-500">*</span>
-                                            </label>
-                                            <textarea
-                                                placeholder='{"header":"...","payload":"...","signature":"..."}'
-                                                value={accountAssociationJson}
-                                                onChange={(e) => {
-                                                    setAccountAssociationJson(e.target.value);
-                                                    setError(null);
-                                                    setVerificationSuccess(null);
-                                                }}
-                                                rows={6}
-                                                className="w-full px-3 py-2 border border-blue-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-black font-mono text-xs bg-white"
-                                                style={{ resize: 'vertical' }}
-                                            />
-                                            <p className="text-xs text-blue-700 mt-1">
-                                                Copy and paste just the accountAssociation object from the Farcaster manifest page
-                                            </p>
+                                        try {
+                                            let parsed = JSON.parse(accountAssociationJson);
                                             
-                                            <button
-                                                onClick={handleUpdateAccountAssociation}
-                                                disabled={isLoading || !accountAssociationJson.trim()}
-                                                className={`mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg font-medium transition-colors ${
-                                                    isLoading || !accountAssociationJson.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700 cursor-pointer'
-                                                }`}
-                                            >
-                                                {isLoading ? 'Updating...' : 'Update Account Association'}
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
+                                            // Handle both formats: with or without outer accountAssociation wrapper
+                                            if (parsed.accountAssociation) {
+                                                parsed = parsed.accountAssociation;
+                                            }
+                                            
+                                            // Validate accountAssociation structure
+                                            if (!parsed.header || !parsed.payload || !parsed.signature) {
+                                                throw new Error('Invalid accountAssociation format. Must contain header, payload, and signature.');
+                                            }
 
+                                            await handleAccountAssociationSuccess(parsed);
+                                            setAccountAssociationJson('');
+                                        } catch (err) {
+                                            logger.error('Account association update error:', err);
+                                            const errorMessage = err instanceof Error ? err.message : 'Failed to update account association';
+                                            setError(errorMessage);
+                                        } finally {
+                                            setIsLoading(false);
+                                        }
+                                    }}
+                                    disabled={isLoading || !accountAssociationJson.trim()}
+                                    className={`px-4 py-2 bg-gray-600 text-white rounded-lg font-medium transition-colors text-sm ${
+                                        isLoading || !accountAssociationJson.trim() ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-700 cursor-pointer'
+                                    }`}
+                                >
+                                    {isLoading ? 'Updating...' : 'Update Account Association'}
+                                </button>
+                            </div>
                         </div>
                     )}
                 </div>
 
-                {/* Footer */}
-                <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50">
+                {/* Footer - Sticky at bottom */}
+                <div className="flex items-center justify-between p-6 border-t border-gray-200 bg-gray-50 sticky bottom-0 z-10">
                     {currentStep === 1 && (
                         <>
                             <button
