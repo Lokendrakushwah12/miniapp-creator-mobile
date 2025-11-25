@@ -5,7 +5,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import type { EarnKit, UserBalance } from "@earnkit/earn";
 import TopUpDialog from "./top-up-dialog";
-import { Button } from "../../components/ui/button";
+import { Button } from "./ui/button";
 import WalletButton from "./WalletButton";
 
 interface BalanceDisplayProps {
