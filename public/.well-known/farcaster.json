@@ -11,5 +11,10 @@
     "subtitle": "my subtitle",
     "description": "my descrip",
     "primaryCategory": "social"
+  },
+  "accountAssociation": {
+    "header": "eyJmaWQiOjE0NTUwNDAsInR5cGUiOiJhdXRoIiwia2V5IjoiMHhFMTc4NmJBNjQzN0U0YTI1MDExNjA0RDBFYzUwM0RBYTVjNWU4ZWQ0In0",
+    "payload": "eyJkb21haW4iOiJodHRwcyJ9",
+    "signature": "DmrcBfX8LDZd/XgKlY2xXmcu2DN3DO+SZ3en1LvDE80rlznz1jlO6+YSV6URMHseJnLcmrvum5fYnd/bFKWWHBs="
   }
 }
