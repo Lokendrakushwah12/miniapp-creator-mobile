@@ -31,6 +31,11 @@ import {
 import { STAGE_MODEL_CONFIG, ANTHROPIC_MODELS } from "./llmOptimizer";
 import { updateFilesWithContractAddresses } from "./contractAddressInjector";
 import {
+  notifyDeploymentComplete,
+  notifyDeploymentFailed,
+  notifyEditComplete,
+} from "./notificationService";
+import {
   parseVercelDeploymentErrors,
   formatErrorsForLLM,
   getFilesToFix,
@@ -1185,6 +1190,14 @@ async function executeInitialGenerationJob(
         logger.error("⚠️ Failed to update project:", dbError);
       }
 
+      // Send notification to user that deployment failed
+      try {
+        await notifyDeploymentFailed(job!.userId, project.id);
+        logger.log(`📬 Deployment failure notification sent to user`);
+      } catch (notifyError) {
+        logger.warn(`⚠️ Failed to send deployment failure notification:`, notifyError);
+      }
+
       // Job was already marked as 'failed' in the deployment loop
       // Throw error to prevent marking as completed
       throw new Error(`Deployment failed: ${deploymentError}`);
@@ -1256,6 +1269,16 @@ async function executeInitialGenerationJob(
     } catch (updateError) {
       logger.error(`❌ Failed to update job status to completed:`, updateError);
       throw updateError; // Re-throw to trigger error handling
+    }
+
+    // Send notification to user that deployment is complete
+    try {
+      const deploymentUrl = result.vercelUrl || result.previewUrl || projectUrl;
+      await notifyDeploymentComplete(job!.userId, project.id, deploymentUrl);
+      logger.log(`📬 Deployment notification sent to user`);
+    } catch (notifyError) {
+      logger.warn(`⚠️ Failed to send deployment notification:`, notifyError);
+      // Don't fail the job if notification fails
     }
 
     logger.log(`✅ Job ${jobId} completed successfully`);
@@ -1505,6 +1528,14 @@ async function executeFollowUpJob(
       throw updateError;
     }
     
+    // Send notification to user that deployment failed
+    try {
+      await notifyDeploymentFailed(job!.userId, projectId);
+      logger.log(`📬 Deployment failure notification sent to user`);
+    } catch (notifyError) {
+      logger.warn(`⚠️ Failed to send deployment failure notification:`, notifyError);
+    }
+    
     // Throw error to prevent any "success" messaging
     throw new Error(`Deployment failed: ${deploymentError}`);
   }
@@ -1531,6 +1562,16 @@ async function executeFollowUpJob(
   } catch (updateError) {
     logger.error(`❌ Failed to update follow-up job status:`, updateError);
     throw updateError;
+  }
+
+  // Send notification to user that edit deployment is complete
+  try {
+    const deploymentUrl = jobResult.previewUrl || getPreviewUrl(projectId) || '';
+    await notifyEditComplete(job!.userId, projectId, deploymentUrl);
+    logger.log(`📬 Edit complete notification sent to user`);
+  } catch (notifyError) {
+    logger.warn(`⚠️ Failed to send edit complete notification:`, notifyError);
+    // Don't fail the job if notification fails
   }
 
   logger.log(`✅ Follow-up job ${jobId} completed successfully`);

@@ -103,7 +103,7 @@ export function useFarcasterAuth() {
       console.log('💰 [useFarcasterAuth] eth_accounts result:', accounts);
       
       // If no accounts connected, request connection
-      // This will prompt the user in Warpcast to approve wallet access
+      // This will prompt the user in Farcaster to approve wallet access
       if (!accounts || accounts.length === 0) {
         console.log('💰 [useFarcasterAuth] No accounts found, requesting connection...');
         try {

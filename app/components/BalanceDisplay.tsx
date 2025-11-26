@@ -50,7 +50,7 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
     if (!isAuthenticated || !walletAddress) {
         return (
             <div className="flex items-center gap-2 text-sm text-gray-500">
-                <span>Connect wallet in Warpcast to view balance</span>
+                <span>Connect wallet in Farcaster to view balance</span>
             </div>
         );
     }

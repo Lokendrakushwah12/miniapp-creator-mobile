@@ -87,7 +87,7 @@ export default function TopUpDialog({
         }
 
         if (!walletAddress) {
-            toast.error("No wallet connected. Please connect your wallet in Warpcast settings.");
+            toast.error("No wallet connected. Please connect your wallet in Farcaster settings.");
             return;
         }
 
@@ -268,7 +268,7 @@ export default function TopUpDialog({
                     
                     {!walletAddress && (
                         <div className="text-center py-3 text-sm text-amber-600 bg-amber-50 rounded-lg">
-                            Connect your wallet in Warpcast settings to top up.
+                            Connect your wallet in Farcaster settings to top up.
                         </div>
                     )}
                 </div>

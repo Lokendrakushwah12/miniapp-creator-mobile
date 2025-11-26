@@ -191,6 +191,23 @@ export async function upsertProjectFile(projectId: string, filename: string, con
   }
 }
 
+// Delete a single project file from database
+export async function deleteProjectFile(projectId: string, filename: string) {
+  logger.log(`🗑️ Deleting file: ${filename} from project ${projectId}`);
+  
+  const [deleted] = await db.delete(projectFiles)
+    .where(and(eq(projectFiles.projectId, projectId), eq(projectFiles.filename, filename)))
+    .returning();
+  
+  if (deleted) {
+    logger.log(`✅ File deleted: ${filename}`);
+  } else {
+    logger.log(`⚠️ File not found for deletion: ${filename}`);
+  }
+  
+  return deleted;
+}
+
 // Patch management
 export async function savePatch(
   projectId: string,

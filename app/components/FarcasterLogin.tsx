@@ -21,7 +21,7 @@ export function FarcasterLogin() {
         );
     }
 
-    // If not in MiniApp, show instruction to open in Warpcast
+    // If not in MiniApp, show instruction to open in Farcaster
     if (!isInMiniApp) {
         return (
             <div className="min-h-screen relative flex items-center justify-center p-6 overflow-hidden font-funnel-sans">
@@ -47,10 +47,10 @@ export function FarcasterLogin() {
                         </div>
                         
                         <h1 className="text-xl font-funnel-sans font-semibold text-gray-800 mb-3">
-                            Open in Warpcast
+                            Open in Farcaster
                         </h1>
                         <p className="text-sm text-gray-600 leading-relaxed">
-                            Minidev is a Farcaster mini app. Please open this app inside Warpcast to continue.
+                            Minidev is a Farcaster mini app. Please open this app inside Farcaster to continue.
                         </p>
                     </div>
 
@@ -61,7 +61,7 @@ export function FarcasterLogin() {
                                 1
                             </div>
                             <p className="text-sm text-gray-700">
-                                Open the <strong>Warpcast</strong> app on your phone
+                                Open the <strong>Farcaster</strong> app on your phone
                             </p>
                         </div>
                         
@@ -84,9 +84,9 @@ export function FarcasterLogin() {
                         </div>
                     </div>
 
-                    {/* Download Warpcast button */}
+                    {/* Download Farcaster button */}
                     <a
-                        href="https://warpcast.com/~/download"
+                        href="https://farcaster.xyz/download"
                         target="_blank"
                         rel="noopener noreferrer"
                         className="w-full bg-purple-600 text-white py-3 px-4 rounded-xl font-funnel-sans font-medium hover:bg-purple-700 focus:ring-2 focus:ring-purple-500/50 focus:ring-offset-2 transition-all duration-200 shadow-lg cursor-pointer flex items-center justify-center gap-2"
@@ -94,7 +94,7 @@ export function FarcasterLogin() {
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                         </svg>
-                        Download Warpcast
+                        Download Farcaster
                     </a>
 
                     {/* Footer */}

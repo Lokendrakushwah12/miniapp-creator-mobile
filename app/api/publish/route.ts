@@ -1,12 +1,10 @@
 import { logger } from "../../../lib/logger";
 import { NextRequest, NextResponse } from 'next/server';
-import { updateGeneratedFile } from '../../../lib/previewManager';
 import { db, projects } from '../../../db';
 import { eq } from 'drizzle-orm';
-import { getUserBySessionToken } from '../../../lib/database';
+import { getUserBySessionToken, getProjectFiles, upsertProjectFile } from '../../../lib/database';
 import { config } from '../../../lib/config';
-import fs from 'fs/promises';
-import path from 'path';
+import { notifyPublishComplete } from '../../../lib/notificationService';
   
 // Validate manifest structure
 function validateManifest(manifest: unknown): { valid: boolean; error?: string } {
@@ -178,18 +176,7 @@ export async function POST(req: NextRequest) {
     const farcasterJsonContent = JSON.stringify(manifest, null, 2);
     const filename = 'public/.well-known/farcaster.json';
 
-    // Update file in generated directory
-    try {
-      await updateGeneratedFile(projectId, filename, farcasterJsonContent);
-      logger.log('✅ File saved to generated directory:', filename);
-    } catch (error) {
-      logger.error('❌ Failed to save file locally:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      logger.error('Error details:', errorMessage);
-      // Continue anyway - file will be created in preview update
-    }
-
-    // Update database - save to both projects table and projectFiles table
+    // Save to DATABASE (source of truth)
     try {
       // Update projects table with manifest metadata
       await db
@@ -202,12 +189,10 @@ export async function POST(req: NextRequest) {
 
       logger.log('✅ Projects table updated with manifest');
 
-      // Also save manifest file to projectFiles table so it appears in file tree
-      // Use upsertProjectFile to add/update just this one file without affecting others
-      const { upsertProjectFile } = await import('../../../lib/database');
+      // Save manifest file to projectFiles table so it appears in file tree
       await upsertProjectFile(projectId, filename, farcasterJsonContent);
 
-      logger.log('✅ Manifest file saved to projectFiles table');
+      logger.log('✅ Manifest file saved to database');
     } catch (error) {
       logger.error('❌ Failed to update database:', error);
       return NextResponse.json(
@@ -225,101 +210,69 @@ export async function POST(req: NextRequest) {
       } else {
         logger.log('🚀 Triggering full Vercel redeploy with manifest file...');
         
-        // Read all project files to include in redeploy
-        const outputDir = process.env.NODE_ENV === 'production' 
-          ? '/tmp/generated' 
-          : path.join(process.cwd(), 'generated');
-        const projectDir = path.join(outputDir, projectId);
-        const allFiles: { filename: string; content: string }[] = [];
+        // Read all project files from DATABASE (not filesystem)
+        // This ensures we get the user's latest edits from the code editor
+        const dbFiles = await getProjectFiles(projectId);
+        logger.log(`📦 Fetched ${dbFiles.length} files from database for Vercel redeploy`);
         
-        async function readDir(dir: string, baseDir: string) {
-          const entries = await fs.readdir(dir, { withFileTypes: true });
+        if (dbFiles.length === 0) {
+          logger.warn('⚠️ No files found in database for project, skipping redeploy');
+        } else {
+          // Convert files to object format for direct API call
+          const filesObject: { [key: string]: string } = {};
+          dbFiles.forEach((file) => {
+            filesObject[file.filename] = file.content;
+          });
           
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            const relativePath = path.relative(baseDir, fullPath);
-            
-            // Skip certain directories
-            if (
-              entry.name === 'node_modules' ||
-              entry.name === '.next' ||
-              entry.name === '.vercel' ||
-              entry.name === 'dist' ||
-              entry.name === 'build' ||
-              entry.name === '.git'
-            ) {
-              continue;
-            }
-            
-            if (entry.isDirectory()) {
-              await readDir(fullPath, baseDir);
-            } else {
-              try {
-                const content = await fs.readFile(fullPath, 'utf-8');
-                allFiles.push({ filename: relativePath, content });
-              } catch (readError) {
-                logger.warn(`⚠️ Failed to read file ${relativePath}:`, readError);
-              }
-            }
+          // Make direct API call to /deploy endpoint to force fresh Vercel deployment
+          const previewApiBase = config.preview.apiBase;
+          // Ensure URL has protocol
+          const baseUrl = previewApiBase.startsWith('http') 
+            ? previewApiBase 
+            : `http://${previewApiBase}`;
+          const deployUrl = `${baseUrl}/deploy`;
+          
+          logger.log(`📤 Triggering fresh Vercel deployment to: ${deployUrl}`);
+          logger.log(`📤 Sending ${Object.keys(filesObject).length} files from database`);
+          
+          const deployResponse = await fetch(deployUrl, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${previewAuthToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              hash: projectId,
+              files: filesObject,
+              deployToExternal: 'vercel',
+              appType: project.appType || 'farcaster', // For reference only
+              skipBoilerplate: true, // CRITICAL: Don't override user's files with boilerplate
+              isWeb3: undefined, // Not deploying contracts
+              skipContracts: true, // Contracts already deployed
+              wait: false, // Don't wait for completion
+            }),
+          });
+          
+          if (!deployResponse.ok) {
+            const errorText = await deployResponse.text();
+            throw new Error(`Vercel deployment failed: ${deployResponse.status} ${errorText}`);
           }
-        }
-        
-        await readDir(projectDir, projectDir);
-        logger.log(`📦 Read ${allFiles.length} files for Vercel redeploy`);
-        
-        // Convert files to object format for direct API call
-        const filesObject: { [key: string]: string } = {};
-        allFiles.forEach((file) => {
-          filesObject[file.filename] = file.content;
-        });
-        
-        // Make direct API call to /deploy endpoint to force fresh Vercel deployment
-        const previewApiBase = config.preview.apiBase;
-        // Ensure URL has protocol
-        const baseUrl = previewApiBase.startsWith('http') 
-          ? previewApiBase 
-          : `http://${previewApiBase}`;
-        const deployUrl = `${baseUrl}/deploy`;
-        
-        logger.log(`📤 Triggering fresh Vercel deployment to: ${deployUrl}`);
-        
-        const deployResponse = await fetch(deployUrl, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${previewAuthToken}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            hash: projectId,
-            files: filesObject,
-            deployToExternal: 'vercel',
-            appType: project.appType || 'farcaster', // For reference only
-            skipBoilerplate: true, // CRITICAL: Don't override user's files with boilerplate
-            isWeb3: undefined, // Not deploying contracts
-            skipContracts: true, // Contracts already deployed
-            wait: false, // Don't wait for completion
-          }),
-        });
-        
-        if (!deployResponse.ok) {
-          const errorText = await deployResponse.text();
-          throw new Error(`Vercel deployment failed: ${deployResponse.status} ${errorText}`);
-        }
-        
-        const previewResponse = await deployResponse.json();
-        
-        logger.log('✅ Vercel redeploy triggered successfully');
-        logger.log(`🌐 Vercel URL: ${previewResponse.vercelUrl || previewResponse.previewUrl}`);
-        
-        // Update the project record with the latest Vercel URL
-        if (previewResponse.vercelUrl) {
-          await db
-            .update(projects)
-            .set({ 
-              vercelUrl: previewResponse.vercelUrl,
-              previewUrl: previewResponse.vercelUrl 
-            })
-            .where(eq(projects.id, project.id));
+          
+          const previewResponse = await deployResponse.json();
+          
+          logger.log('✅ Vercel redeploy triggered successfully');
+          logger.log(`🌐 Vercel URL: ${previewResponse.vercelUrl || previewResponse.previewUrl}`);
+          
+          // Update the project record with the latest Vercel URL
+          if (previewResponse.vercelUrl) {
+            await db
+              .update(projects)
+              .set({ 
+                vercelUrl: previewResponse.vercelUrl,
+                previewUrl: previewResponse.vercelUrl 
+              })
+              .where(eq(projects.id, project.id));
+          }
         }
       }
     } catch (error) {
@@ -332,6 +285,15 @@ export async function POST(req: NextRequest) {
     const manifestUrl = `${projectUrl}/.well-known/farcaster.json`;
 
     logger.log('✅ Publish successful:', { projectId, manifestUrl });
+
+    // Send notification to user that publish is complete
+    try {
+      await notifyPublishComplete(userId, projectId, manifestUrl);
+      logger.log('📬 Publish notification sent to user');
+    } catch (notifyError) {
+      logger.warn('⚠️ Failed to send publish notification:', notifyError);
+      // Don't fail the request if notification fails
+    }
 
     return NextResponse.json({
       success: true,

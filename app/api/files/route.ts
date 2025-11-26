@@ -1,18 +1,13 @@
 import { logger } from "../../../lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import fs from "fs-extra";
 import path from "path";
 import {
   updatePreviewFiles,
-  getGeneratedFile,
-  listGeneratedFiles,
-  updateGeneratedFile,
-  deleteGeneratedFile,
 } from "../../../lib/previewManager";
-import { getProjectFiles } from "../../../lib/database";
+import { getProjectFiles, upsertProjectFile, deleteProjectFile } from "../../../lib/database";
 import { headers } from "next/headers";
 
-// GET: List files or fetch file content from generated directory
+// GET: List files or fetch file content from DATABASE (source of truth)
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -32,41 +27,25 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    // Handle file listing request
+    // Handle file listing request - always from database
     if (listFiles) {
-      logger.log(
-        `📋 Listing files from generated directory for project: ${projectId}`
-      );
+      logger.log(`📋 Listing files from database for project: ${projectId}`);
       try {
-        let files = await listGeneratedFiles(projectId);
-        logger.log(
-          `📁 Found ${files.length} files in generated directory:`,
-          files
-        );
+        const dbFiles = await getProjectFiles(projectId);
+        const files = dbFiles.map(f => f.filename);
+        logger.log(`📁 Found ${files.length} files in database`);
 
-        // If no files found in generated directory, try database
-        if (files.length === 0) {
-          logger.log(`📋 No files in generated directory, checking database...`);
-          const dbFiles = await getProjectFiles(projectId);
-          files = dbFiles.map(f => f.filename);
-          logger.log(
-            `📁 Found ${files.length} files in database:`,
-            files
-          );
-        }
-
-        // Ensure we always return a valid JSON response
         const response = {
           files: files || [],
           projectId: projectId,
           totalFiles: files.length,
         };
-        logger.log(`📤 Sending response:`, JSON.stringify(response, null, 2));
+        logger.log(`📤 Sending response with ${files.length} files`);
         return NextResponse.json(response);
       } catch (error) {
-        logger.error(`❌ Error listing generated files:`, error);
+        logger.error(`❌ Error listing files from database:`, error);
         return NextResponse.json(
-          { error: "Failed to list generated files" },
+          { error: "Failed to list files" },
           { status: 500 }
         );
       }
@@ -84,30 +63,20 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
     }
 
-    logger.log(`🔍 Fetching file from generated directory: ${filePath}`);
+    logger.log(`🔍 Fetching file from database: ${filePath}`);
 
     try {
-      let content = await getGeneratedFile(projectId, filePath);
-
-      if (!content) {
-        logger.log(`❌ File not found in generated directory: ${filePath}, checking database...`);
-        // Try to get from database
-        const dbFiles = await getProjectFiles(projectId);
-        const dbFile = dbFiles.find(f => f.filename === filePath);
-        if (dbFile) {
-          content = dbFile.content;
-          logger.log(
-            `✅ Found file in database: ${filePath} (${content.length} chars)`
-          );
-        } else {
-          logger.log(`❌ File not found in database either: ${filePath}`);
-          return NextResponse.json({ error: "File not found" }, { status: 404 });
-        }
-      } else {
-        logger.log(
-          `✅ Found file in generated directory: ${filePath} (${content.length} chars)`
-        );
+      // Get file from database (source of truth)
+      const dbFiles = await getProjectFiles(projectId);
+      const dbFile = dbFiles.find(f => f.filename === filePath);
+      
+      if (!dbFile) {
+        logger.log(`❌ File not found in database: ${filePath}`);
+        return NextResponse.json({ error: "File not found" }, { status: 404 });
       }
+
+      const content = dbFile.content;
+      logger.log(`✅ Found file in database: ${filePath} (${content.length} chars)`);
 
       // Determine content type based on file extension
       const ext = path.extname(filePath);
@@ -128,9 +97,9 @@ export async function GET(request: NextRequest) {
         },
       });
     } catch (error) {
-      logger.error(`❌ Error fetching file from container:`, error);
+      logger.error(`❌ Error fetching file from database:`, error);
       return NextResponse.json(
-        { error: "Failed to fetch file from container" },
+        { error: "Failed to fetch file" },
         { status: 500 }
       );
     }
@@ -143,7 +112,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// PUT: Save file content to both local and container
+// PUT: Save file content to DATABASE (source of truth)
 export async function PUT(request: NextRequest) {
   try {
     const { projectId, filename, content } = await request.json();
@@ -176,22 +145,24 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
     }
 
-    // Write to local filesystem (for backup and consistency)
+    // Save to DATABASE (source of truth)
     try {
-      await updateGeneratedFile(projectId, filename, content);
-      logger.log(`✅ File saved locally: ${filename}`);
+      await upsertProjectFile(projectId, filename, content);
+      logger.log(`✅ File saved to database: ${filename}`);
     } catch (error) {
-      logger.warn(`⚠️ Failed to save file locally:`, error);
-      // Don't fail the request if local save fails
+      logger.error(`❌ Failed to save file to database:`, error);
+      return NextResponse.json(
+        { error: "Failed to save file to database" },
+        { status: 500 }
+      );
     }
 
-    // Update the preview with the new file (optional - may not be supported on Railway)
+    // Update the preview with the new file (optional - for live preview)
     try {
       await updatePreviewFiles(projectId, [{ filename, content }], accessToken);
       logger.log(`✅ Preview updated with file: ${filename}`);
     } catch (error) {
-      logger.warn(`⚠️  Failed to update preview files (this is expected on Railway):`, error);
-      logger.log(`📁 File ${filename} has been saved locally`);
+      logger.warn(`⚠️ Failed to update preview (non-critical):`, error);
       // Don't fail the request - preview updates are optional
     }
 
@@ -207,7 +178,7 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// DELETE: Delete a file from both local and container
+// DELETE: Delete a file from DATABASE (source of truth)
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -232,26 +203,10 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Invalid file path" }, { status: 400 });
     }
 
-    // Delete from local filesystem
-    // Use local generated folder for development, /tmp/generated for production
-    const generatedDir = process.env.NODE_ENV === 'production' 
-      ? path.join("/tmp/generated", projectId)
-      : path.join(process.cwd(), "generated", projectId);
-    const localFilePath = path.join(generatedDir, filename);
-
+    // Delete from DATABASE (source of truth)
     try {
-      if (await fs.pathExists(localFilePath)) {
-        await fs.remove(localFilePath);
-        logger.log(`✅ File deleted locally: ${localFilePath}`);
-      }
-    } catch (error) {
-      logger.warn(`⚠️ Failed to delete file locally:`, error);
-    }
-
-    // Delete from preview
-    try {
-      await deleteGeneratedFile(projectId, filename);
-      logger.log(`✅ Generated file deleted: ${filename}`);
+      await deleteProjectFile(projectId, filename);
+      logger.log(`✅ File deleted from database: ${filename}`);
 
       return NextResponse.json({
         success: true,
@@ -260,9 +215,9 @@ export async function DELETE(request: NextRequest) {
         message: "File deleted successfully",
       });
     } catch (error) {
-      logger.error(`❌ Failed to delete generated file:`, error);
+      logger.error(`❌ Failed to delete file from database:`, error);
       return NextResponse.json(
-        { error: "Failed to delete generated file" },
+        { error: "Failed to delete file" },
         { status: 500 }
       );
     }

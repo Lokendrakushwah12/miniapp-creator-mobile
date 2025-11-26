@@ -1,16 +1,8 @@
 import { logger } from "../../../../../lib/logger";
 import { NextRequest, NextResponse } from "next/server";
 import { authenticateRequest } from "@/lib/auth";
-import { createPreview } from "@/lib/previewManager";
-import { getProjectById } from "@/lib/database";
-import fs from "fs-extra";
-import path from "path";
-
-function getProjectBaseDir(projectId: string): string {
-  return process.env.NODE_ENV === 'production'
-    ? path.join("/tmp/generated", projectId)
-    : path.join(process.cwd(), "generated", projectId);
-}
+import { redeployToVercel } from "@/lib/previewManager";
+import { getProjectById, getProjectFiles, upsertProjectFile } from "@/lib/database";
 
 export async function POST(
   req: NextRequest,
@@ -33,68 +25,38 @@ export async function POST(
       );
     }
 
-    logger.log(`📝 Updating file: ${filePath} in project: ${projectId}`);
-    logger.log(`🔄 Redeploy requested: ${redeploy}`);
-
-    // Get project directory
-    const projectDir = getProjectBaseDir(projectId);
-    const fullFilePath = path.join(projectDir, filePath);
-
-    // Ensure the file exists in the project
-    if (!fullFilePath.startsWith(projectDir)) {
+    // Security check: prevent directory traversal
+    if (filePath.includes("..") || filePath.startsWith("/")) {
       return NextResponse.json(
         { error: "Invalid file path" },
         { status: 400 }
       );
     }
 
-    // Create directory if it doesn't exist
-    await fs.ensureDir(path.dirname(fullFilePath));
+    logger.log(`📝 Updating file: ${filePath} in project: ${projectId}`);
+    logger.log(`🔄 Redeploy requested: ${redeploy}`);
 
-    // Write the updated content
-    await fs.writeFile(fullFilePath, content, "utf-8");
-    logger.log(`✅ File updated: ${filePath}`);
+    // Save to DATABASE (source of truth)
+    try {
+      await upsertProjectFile(projectId, filePath, content);
+      logger.log(`✅ File saved to database: ${filePath}`);
+    } catch (dbError) {
+      logger.error(`❌ Failed to save file to database:`, dbError);
+      return NextResponse.json(
+        { error: "Failed to save file to database" },
+        { status: 500 }
+      );
+    }
 
     // If redeploy is requested, trigger a new deployment
     if (redeploy) {
       logger.log(`🚀 Triggering redeployment for project: ${projectId}`);
 
       try {
-        // Read all files from the project directory
-        const files: { filename: string; content: string }[] = [];
-        
-        async function readDir(dir: string, baseDir: string) {
-          const entries = await fs.readdir(dir, { withFileTypes: true });
-          
-          for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-            const relativePath = path.relative(baseDir, fullPath);
-            
-            // Skip node_modules, .next, etc.
-            if (
-              entry.name === 'node_modules' ||
-              entry.name === '.next' ||
-              entry.name === '.vercel' ||
-              entry.name === 'dist' ||
-              entry.name === 'build'
-            ) {
-              continue;
-            }
-            
-            if (entry.isDirectory()) {
-              await readDir(fullPath, baseDir);
-            } else {
-              const content = await fs.readFile(fullPath, 'utf-8');
-              files.push({
-                filename: relativePath,
-                content
-              });
-            }
-          }
-        }
-        
-        await readDir(projectDir, projectDir);
-        logger.log(`📦 Read ${files.length} files for redeployment`);
+        // Read all files from DATABASE (source of truth)
+        const dbFiles = await getProjectFiles(projectId);
+        const files = dbFiles.map(f => ({ filename: f.filename, content: f.content }));
+        logger.log(`📦 Fetched ${files.length} files from database for redeployment`);
 
         // Get project's app type from database
         const project = await getProjectById(projectId);
@@ -102,28 +64,26 @@ export async function POST(
         logger.log(`🎯 Project app type: ${appType}`);
 
         // Use PREVIEW_AUTH_TOKEN to authenticate with orchestrator
-        // NOT the user's session token
         const previewAuthToken = process.env.PREVIEW_AUTH_TOKEN || '';
 
-        // Trigger deployment with correct boilerplate based on project's app type
-        const previewData = await createPreview(
+        // Trigger redeployment with skipBoilerplate to preserve user's code
+        const previewData = await redeployToVercel(
           projectId,
           files,
           previewAuthToken,
-          appType, // Which boilerplate to use
-          undefined, // isWeb3 - not deploying contracts
-          true  // skipContracts - already deployed
+          appType,
+          undefined // isWeb3
         );
 
         logger.log(`✅ Redeployment triggered`);
-        logger.log(`🌐 Preview URL: ${previewData.previewUrl || previewData.vercelUrl}`);
+        logger.log(`🌐 Preview URL: ${previewData.vercelUrl}`);
 
         return NextResponse.json({
           success: true,
           message: "File updated and redeployment triggered",
           filePath,
-          deploymentUrl: previewData.previewUrl || previewData.vercelUrl,
-          status: previewData.status
+          deploymentUrl: previewData.vercelUrl,
+          status: "deployed"
         });
       } catch (deployError) {
         logger.error(`❌ Redeployment failed:`, deployError);

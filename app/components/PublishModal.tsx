@@ -4,6 +4,97 @@ import { useState, useEffect, useRef } from 'react';
 import { useAuthContext } from '../contexts/AuthContext';
 import { sdk } from '@farcaster/miniapp-sdk';
 
+// Confetti component for celebration
+function Confetti() {
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return;
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        const particles: Array<{
+            x: number;
+            y: number;
+            vx: number;
+            vy: number;
+            color: string;
+            size: number;
+            rotation: number;
+            rotationSpeed: number;
+        }> = [];
+
+        const colors = ['#8B5CF6', '#EC4899', '#F59E0B', '#10B981', '#3B82F6', '#EF4444'];
+
+        // Create particles
+        for (let i = 0; i < 150; i++) {
+            particles.push({
+                x: Math.random() * canvas.width,
+                y: Math.random() * canvas.height - canvas.height,
+                vx: (Math.random() - 0.5) * 4,
+                vy: Math.random() * 3 + 2,
+                color: colors[Math.floor(Math.random() * colors.length)],
+                size: Math.random() * 10 + 5,
+                rotation: Math.random() * Math.PI * 2,
+                rotationSpeed: (Math.random() - 0.5) * 0.2,
+            });
+        }
+
+        let animationId: number;
+        const animate = () => {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            particles.forEach((p) => {
+                ctx.save();
+                ctx.translate(p.x, p.y);
+                ctx.rotate(p.rotation);
+                ctx.fillStyle = p.color;
+                ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+                ctx.restore();
+
+                p.x += p.vx;
+                p.y += p.vy;
+                p.vy += 0.1;
+                p.rotation += p.rotationSpeed;
+
+                if (p.y > canvas.height) {
+                    p.y = -20;
+                    p.x = Math.random() * canvas.width;
+                    p.vy = Math.random() * 3 + 2;
+                }
+            });
+
+            animationId = requestAnimationFrame(animate);
+        };
+
+        animate();
+
+        // Stop after 5 seconds
+        const timeout = setTimeout(() => {
+            cancelAnimationFrame(animationId);
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }, 5000);
+
+        return () => {
+            cancelAnimationFrame(animationId);
+            clearTimeout(timeout);
+        };
+    }, []);
+
+    return (
+        <canvas
+            ref={canvasRef}
+            className="fixed inset-0 pointer-events-none z-[60]"
+            style={{ width: '100vw', height: '100vh' }}
+        />
+    );
+}
+
 interface PublishModalProps {
     isOpen: boolean;
     onClose: () => void;
@@ -142,6 +233,8 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [manifestUrl, setManifestUrl] = useState<string | null>(null);
+    const [shareableLink, setShareableLink] = useState<string | null>(null);
+    const [showConfetti, setShowConfetti] = useState(false);
     
     // Form fields for manifest
     const [appName, setAppName] = useState('');
@@ -170,6 +263,8 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
             setCurrentStep('form');
             setError(null);
             setManifestUrl(null);
+            setShareableLink(null);
+            setShowConfetti(false);
         }
     }, [isOpen, projectUrl]);
 
@@ -330,7 +425,12 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
 
             logger.log('✅ Publish successful:', result);
             setManifestUrl(result.manifestUrl);
+            
+            // The app's homeUrl is the shareable link - Farcaster recognizes it as a miniapp
+            setShareableLink(homeUrl.trim());
+            
             setCurrentStep('success');
+            setShowConfetti(true);
         } catch (err) {
             logger.error('Publish error:', err);
 
@@ -353,6 +453,8 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
         setCurrentStep('form');
         setError(null);
         setManifestUrl(null);
+        setShareableLink(null);
+        setShowConfetti(false);
         setIsLoading(false);
         setAppName('');
         setIconUrl('');
@@ -369,16 +471,19 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
             <div className="bg-white rounded-2xl max-w-3xl w-full max-h-[90vh] overflow-hidden shadow-xl flex flex-col">
+                {/* Confetti overlay */}
+                {showConfetti && <Confetti />}
+
                 {/* Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-200">
                     <div>
                         <h2 className="text-2xl font-funnel-display font-semibold text-black">
-                            Publish to Farcaster Registry
+                            {currentStep === 'success' ? '🎉 Congratulations!' : 'Publish Your App'}
                         </h2>
                         <p className="text-gray-600 mt-1">
                             {currentStep === 'form' && 'Fill in your app details'}
                             {currentStep === 'publishing' && 'Publishing your app...'}
-                            {currentStep === 'success' && 'Your app is published!'}
+                            {currentStep === 'success' && 'You did a great job!'}
                         </p>
                     </div>
                     <button
@@ -609,75 +714,116 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                     {/* Success Step */}
                     {currentStep === 'success' && (
                         <div className="flex flex-col items-center justify-center py-8">
-                            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mb-4">
-                                <svg className="w-8 h-8 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                                </svg>
+                            {/* Celebration Icon */}
+                            <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center mb-6 animate-bounce">
+                                <span className="text-4xl">🚀</span>
                             </div>
-                            <h3 className="text-2xl font-semibold text-black mb-2">Published Successfully!</h3>
-                            <p className="text-gray-600 text-center mb-6">
-                                Your app is now registered on Farcaster with your account association!
+                            
+                            <h3 className="text-2xl font-bold text-black mb-2">Your App is Live!</h3>
+                            <p className="text-gray-600 text-center mb-6 max-w-md">
+                                You did a great job! Your miniapp is now deployed and ready to share with the world.
                             </p>
 
-                            {manifestUrl && (
-                                <div className="w-full bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4">
-                                    <label className="block text-sm font-medium text-gray-700 mb-2">
-                                        Manifest URL
-                                    </label>
-                                    <div className="flex items-center gap-2">
-                                        <code className="flex-1 text-sm text-gray-800 bg-white p-2 rounded border border-gray-300 break-all">
-                                            {manifestUrl}
-                                        </code>
-                                        <a
-                                            href={manifestUrl}
-                                            target="_blank"
-                                            rel="noopener noreferrer"
-                                            className="p-2 bg-black text-white rounded hover:bg-gray-800 transition-colors cursor-pointer"
-                                            title="Open manifest"
-                                        >
-                                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                            </svg>
-                                        </a>
+                            {/* Share on Farcaster */}
+                            {shareableLink && (
+                                <div className="w-full bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-5 mb-4">
+                                    <div className="flex items-center gap-2 mb-3">
+                                        <svg className="w-5 h-5 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M18.24 3.66H5.76C4.24 3.66 3 4.9 3 6.42v11.16c0 1.52 1.24 2.76 2.76 2.76h12.48c1.52 0 2.76-1.24 2.76-2.76V6.42c0-1.52-1.24-2.76-2.76-2.76zm-6.24 12.9c-2.52 0-4.56-2.04-4.56-4.56s2.04-4.56 4.56-4.56 4.56 2.04 4.56 4.56-2.04 4.56-4.56 4.56z"/>
+                                        </svg>
+                                        <label className="text-sm font-semibold text-purple-900">
+                                            Share Your App
+                                        </label>
                                     </div>
+                                    
+                                    {/* Share on Farcaster Button - Uses SDK composeCast */}
+                                    <button
+                                        onClick={async () => {
+                                            try {
+                                                await sdk.actions.composeCast({
+                                                    text: `Check out my new miniapp: ${appName}! 🚀`,
+                                                    embeds: [shareableLink],
+                                                });
+                                                logger.log('✅ Cast composer opened');
+                                            } catch (err) {
+                                                logger.error('Failed to open cast composer:', err);
+                                            }
+                                        }}
+                                        className="w-full mb-3 flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors cursor-pointer font-medium"
+                                    >
+                                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                                            <path d="M18.24 3.66H5.76C4.24 3.66 3 4.9 3 6.42v11.16c0 1.52 1.24 2.76 2.76 2.76h12.48c1.52 0 2.76-1.24 2.76-2.76V6.42c0-1.52-1.24-2.76-2.76-2.76zm-6.24 12.9c-2.52 0-4.56-2.04-4.56-4.56s2.04-4.56 4.56-4.56 4.56 2.04 4.56 4.56-2.04 4.56-4.56 4.56z"/>
+                                        </svg>
+                                        Share on Farcaster
+                                    </button>
+                                    
+                                    {/* Copy Link */}
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            readOnly
+                                            value={shareableLink}
+                                            className="flex-1 text-sm text-gray-700 bg-white p-3 rounded-lg border border-purple-200 focus:outline-none"
+                                        />
+                                        <button
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(shareableLink);
+                                            }}
+                                            className="p-3 bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 transition-colors cursor-pointer"
+                                            title="Copy link"
+                                        >
+                                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-purple-700 mt-2">
+                                        Share this link anywhere - it will open as a miniapp in Farcaster!
+                                    </p>
                                 </div>
                             )}
 
-                            <div className="w-full bg-green-50 border border-green-200 rounded-lg p-4 mb-4">
-                                <p className="text-sm text-green-800 mb-2">
-                                    <strong>✅ What&apos;s been done:</strong>
+                            {/* What's been done */}
+                            <div className="w-full bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
+                                <p className="text-sm text-green-800 mb-2 font-semibold">
+                                    ✅ What&apos;s been done:
                                 </p>
-                                <ul className="text-sm text-green-800 space-y-1 list-disc list-inside">
-                                    <li>Manifest created with your app details</li>
-                                    <li>Account association signed with your Farcaster account</li>
-                                    <li>Deployed to <code className="bg-green-100 px-1 rounded">/.well-known/farcaster.json</code></li>
-                                    <li>App redeployed to Vercel with manifest</li>
+                                <ul className="text-sm text-green-800 space-y-1">
+                                    <li className="flex items-center gap-2">
+                                        <span className="text-green-600">•</span>
+                                        App manifest created and signed with your Farcaster account
+                                    </li>
+                                    <li className="flex items-center gap-2">
+                                        <span className="text-green-600">•</span>
+                                        Deployed and ready for users
+                                    </li>
+                                    <li className="flex items-center gap-2">
+                                        <span className="text-green-600">•</span>
+                                        Your app URL now works as a Farcaster miniapp
+                                    </li>
                                 </ul>
                             </div>
 
-                            <div className="w-full bg-yellow-50 border border-yellow-200 rounded-lg p-4">
-                                <p className="text-sm text-yellow-800 mb-2">
-                                    <strong>🚀 Next Step: Submit to Farcaster Registry</strong>
-                                </p>
-                                <p className="text-sm text-yellow-800 mb-3">
-                                    Your app is ready! Submit it to Farcaster&apos;s registry to make it discoverable.
-                                </p>
-                                <ol className="text-sm text-yellow-800 space-y-1 list-decimal list-inside mb-3">
-                                    <li>Visit the Farcaster Registry</li>
-                                    <li>Submit your manifest URL</li>
-                                    <li>Wait for approval (usually takes a few days)</li>
-                                </ol>
-                                <a
-                                    href="https://farcaster.xyz/~/developers/mini-apps/registry"
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-2 px-4 py-2 bg-yellow-600 text-white rounded-lg hover:bg-yellow-700 transition-colors text-sm font-medium"
-                                >
-                                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                    </svg>
-                                    Submit to Farcaster Registry
-                                </a>
+                            {/* Important Info about Miniapp Store */}
+                            <div className="w-full bg-blue-50 border border-blue-200 rounded-xl p-4">
+                                <div className="flex items-start gap-3">
+                                    <div className="p-2 bg-blue-100 rounded-lg">
+                                        <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <p className="text-sm font-semibold text-blue-900 mb-1">
+                                            About the Miniapp Store
+                                        </p>
+                                        <p className="text-sm text-blue-800">
+                                            Your app is now live and can be shared via the link above! Note that apps don&apos;t appear in the Farcaster Miniapp Store directly - your app needs to gain users and traction before it can be featured there.
+                                        </p>
+                                        <p className="text-sm text-blue-800 mt-2">
+                                            <strong>Tip:</strong> Share your app link on Farcaster, Twitter, and with your community to get more users!
+                                        </p>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                     )}
