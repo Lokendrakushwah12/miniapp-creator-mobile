@@ -1,6 +1,6 @@
 import { logger } from "../../../../lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { getGenerationJobById, getUserByPrivyId } from "../../../../lib/database";
+import { getGenerationJobById, getUserByFarcasterFid } from "../../../../lib/database";
 import { authenticateRequest } from "../../../../lib/auth";
 
 /**
@@ -23,9 +23,9 @@ export async function GET(
     let user;
 
     if (bypassAuth && testUserId) {
-      // For testing: Look up database user ID from privy_user_id
-      // (testUserId is the privy_user_id, but we need the actual database user.id)
-      const dbUser = await getUserByPrivyId(testUserId);
+      // For testing: Look up database user ID from farcaster_fid
+      // (testUserId is the farcaster_fid, but we need the actual database user.id)
+      const dbUser = await getUserByFarcasterFid(testUserId);
       if (!dbUser) {
         return NextResponse.json(
           { error: "Test user not found in database" },

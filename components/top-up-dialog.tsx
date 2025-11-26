@@ -10,13 +10,14 @@ import {
     DialogTrigger,
 } from "./ui/dialog";
 import { Button } from "./ui/button";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EarnKit, TopUpOption, UserBalance } from "@earnkit/earn";
 import { useEffect, useState } from "react";
 import { toast } from "react-hot-toast";
 import { createWalletClient, custom, keccak256, parseAbi, toBytes } from "viem";
 import { base } from "viem/chains";
+import { useAuthContext } from "@/contexts/AuthContext";
+import sdk from "@farcaster/miniapp-sdk";
 
 interface EscrowContract {
     address: string;
@@ -50,10 +51,31 @@ export default function TopUpDialog({
     const [loading, setLoading] = useState<boolean>(false);
     const [open, setOpen] = useState<boolean>(false);
     const [processingOption, setProcessingOption] = useState<string | null>(null);
+    const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
-    const { ready, authenticated } = usePrivy();
-    const { wallets } = useWallets();
+    const { isAuthenticated, isInMiniApp } = useAuthContext();
     const queryClient = useQueryClient();
+
+    // Get wallet address from Farcaster SDK
+    useEffect(() => {
+        const getWalletAddress = async () => {
+            if (!isInMiniApp) return;
+
+            try {
+                const provider = sdk.wallet.ethProvider;
+                if (provider) {
+                    const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
+                    if (accounts && accounts.length > 0) {
+                        setWalletAddress(accounts[0]);
+                    }
+                }
+            } catch (error) {
+                logger.log('Failed to get wallet address from Farcaster:', error);
+            }
+        };
+
+        getWalletAddress();
+    }, [isInMiniApp]);
 
     // Data Fetching - fetch top-up details when dialog opens
     useEffect(() => {
@@ -81,12 +103,12 @@ export default function TopUpDialog({
     // Core Logic - handle top-up transaction using contract call
     const handleTopUp = async (option: TopUpOption) => {
         // Guard clauses
-        if (!ready || !authenticated) {
-            toast.error("Please connect your wallet first");
+        if (!isAuthenticated || !isInMiniApp) {
+            toast.error("Please open this app in Warpcast");
             return;
         }
 
-        if (!wallets[0]?.address) {
+        if (!walletAddress) {
             toast.error("No wallet connected");
             return;
         }
@@ -96,24 +118,34 @@ export default function TopUpDialog({
             return;
         }
 
-        const wallet = wallets[0];
         setProcessingOption(option.label);
 
         let txToast: string | undefined;
         try {
             txToast = toast.loading("Preparing transaction...");
 
-            // Switch to Base network
-            await wallet.switchChain(base.id);
+            // Get Farcaster's Ethereum provider
+            const provider = sdk.wallet.ethProvider;
+            if (!provider) {
+                throw new Error("Farcaster wallet provider not available");
+            }
 
-            // Get Ethereum provider
-            const eip1193 = await wallet.getEthereumProvider();
+            // Request to switch to Base network
+            try {
+                await provider.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: `0x${base.id.toString(16)}` }],
+                });
+            } catch (switchError) {
+                // If the chain hasn't been added, add it
+                logger.log('Chain switch failed, attempting to add Base:', switchError);
+            }
 
-            // Create wallet client
+            // Create wallet client using Farcaster's provider
             const walletClient = createWalletClient({
                 chain: base,
-                transport: custom(eip1193),
-                account: wallet.address as `0x${string}`,
+                transport: custom(provider),
+                account: walletAddress as `0x${string}`,
             });
 
             // Parse ABI for deposit function
@@ -140,7 +172,7 @@ export default function TopUpDialog({
             // Submit transaction to SDK
             await activeAgent.submitTopUpTransaction({
                 txHash: hash,
-                walletAddress: wallet.address,
+                walletAddress: walletAddress,
                 amountInUSD: option.amountInUSD,
                 amountInEth: option.amountInEth,
                 creditsToTopUp: option.creditsToTopUp,
@@ -149,13 +181,13 @@ export default function TopUpDialog({
 
             // Get current balance for polling comparison
             const currentBalance = await activeAgent.getBalance({
-                walletAddress: wallet.address,
+                walletAddress: walletAddress,
             });
             logger.log(currentBalance, "currentBalance");
 
             // Poll for balance update
             activeAgent.pollForBalanceUpdate({
-                walletAddress: wallet.address,
+                walletAddress: walletAddress,
                 initialBalance: currentBalance,
                 onConfirmation: (newBalance: UserBalance) => {
                     toast.success("Top-up successful! Balance updated.", { id: txToast });
@@ -275,9 +307,3 @@ export default function TopUpDialog({
         </Dialog>
     );
 }
-
-
-
-
-
-

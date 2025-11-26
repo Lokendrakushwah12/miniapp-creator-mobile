@@ -1,18 +1,18 @@
 "use client";
 import { logger } from "@/lib/logger";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CodeEditorAndPreview } from "./CodeEditorAndPreview";
 import { PublishModal } from "./PublishModal";
 import TopUpDialog from "./top-up-dialog";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import type { EarnKit } from "@earnkit/earn";
 import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import { Button } from "./ui/button";
 import { Rocket } from "lucide-react";
 import BalanceDisplay from "./BalanceDisplay";
+import sdk from "@farcaster/miniapp-sdk";
 
 interface GeneratedProject {
   projectId: string;
@@ -41,15 +41,32 @@ export function CodeGenerator({
   activeAgent,
   feeModelType,
 }: CodeGeneratorProps) {
-  const { sessionToken } = useAuthContext();
+  const { sessionToken, isAuthenticated, isInMiniApp } = useAuthContext();
   const [viewMode, setViewMode] = useState<"code" | "preview">("preview");
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
-  // For balance display
-  const { ready: privyReady, authenticated } = usePrivy();
-  const { wallets } = useWallets();
-  const walletAddress = wallets[0]?.address;
+  // Get wallet address from Farcaster SDK
+  useEffect(() => {
+    const getWalletAddress = async () => {
+      if (!isInMiniApp) return;
+
+      try {
+        const provider = sdk.wallet.ethProvider;
+        if (provider) {
+          const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
+          if (accounts && accounts.length > 0) {
+            setWalletAddress(accounts[0]);
+          }
+        }
+      } catch (error) {
+        logger.log('Failed to get wallet address from Farcaster:', error);
+      }
+    };
+
+    getWalletAddress();
+  }, [isInMiniApp]);
 
   // Get balance data
   const { data: balance } = useQuery({
@@ -59,7 +76,7 @@ export function CodeGenerator({
         throw new Error("Wallet not connected");
       return activeAgent.getBalance({ walletAddress });
     },
-    enabled: !!walletAddress && !!activeAgent && privyReady && authenticated,
+    enabled: !!walletAddress && !!activeAgent && isAuthenticated,
     placeholderData: { eth: "0", credits: "0" },
     staleTime: 1000 * 30,
   });
@@ -204,11 +221,6 @@ export function CodeGenerator({
               </TabsTrigger>
             </TabsList>
           </Tabs>
-
-          {/* <div className="flex items-center gap-2">
-            <Icons.earnySmallGrayIcon className="w-5 h-5 text-gray-400" />
-            <span className="text-lg font-funnel-display text-black font-medium">Miniapp Preview</span>
-          </div> */}
         </div>
 
         {/* Right side - Link Actions, Publish Button & Balance Display */}

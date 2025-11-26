@@ -71,14 +71,6 @@ export function Preview({ currentProject }: PreviewProps) {
       },
     ] as const;
 
-    const handleTemplateSelect = (prompt: string) => {
-      if (typeof window === "undefined") {
-        return;
-      }
-      const event = new CustomEvent("templateSelect", { detail: prompt });
-      window.dispatchEvent(event);
-    };
-
     return (
       <div className="h-full flex flex-col justify-center items-center bg-white overflow-y-auto">
         <div className="flex-1 flex items-center justify-center p-6">

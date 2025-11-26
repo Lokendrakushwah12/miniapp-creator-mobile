@@ -1,18 +1,8 @@
-import { clsx, type ClassValue } from "clsx";
 import * as fs from 'fs';
 import * as path from 'path';
-import { twMerge } from "tailwind-merge";
 import { SecureCommandExecutor, formatCommandResult } from './commandExecutor';
 import { ContextGatheringResult, STAGE_MODEL_CONFIG } from './llmOptimizer';
 import { logger } from "./logger";
-
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs))
-}
-
-export function absoluteUrl(path: string) {
-  return `${process.env.NEXT_PUBLIC_APP_URL}${path}`
-}
 
 
 // Debug logging utilities

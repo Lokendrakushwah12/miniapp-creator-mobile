@@ -11,7 +11,6 @@ import { useAuthContext } from '../contexts/AuthContext';
 import { useApiUtils } from '@/lib/apiUtils';
 import { EarnKit } from '@earnkit/earn';
 import { useProjectStore } from '@/store/useProjectStore';
-import BalanceDisplay from './BalanceDisplay';
 
 interface GeneratedProject {
   projectId: string;

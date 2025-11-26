@@ -17,12 +17,6 @@ export const config = {
     maxConnections: parseInt(process.env.DB_MAX_CONNECTIONS || "10"),
   },
 
-  // Privy configuration
-  privy: {
-    appId: process.env.NEXT_PUBLIC_PRIVY_APP_ID || "",
-    appSecret: process.env.PRIVY_APP_SECRET || "",
-  },
-
   // Preview host configuration
   preview: {
     apiBase: process.env.PREVIEW_API_BASE || "minidev.fun",

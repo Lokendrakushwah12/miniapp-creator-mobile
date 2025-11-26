@@ -8,13 +8,15 @@ interface AuthContextType {
   sessionToken: string | null;
   user: {
     id: string;
-    privyUserId: string;
-    email?: string;
+    farcasterFid: string;
+    username?: string;
     displayName?: string;
     pfpUrl?: string;
   } | null;
   isLoading: boolean;
+  isInMiniApp: boolean;
   handleSessionExpired: () => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);

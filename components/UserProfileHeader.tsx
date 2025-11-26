@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect } from "react";
 import Image from "next/image";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useSidebarContext } from "@/components/SidebarContext";
 import { Button } from "./ui/button";
 
@@ -12,27 +11,10 @@ interface UserProfileHeaderProps {
 }
 
 export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
-  const { user } = useAuthContext();
-  const {
-    linkFarcaster,
-    unlinkFarcaster,
-    logout,
-    user: privyUser,
-  } = usePrivy();
-  const { wallets } = useWallets();
-  const walletAddress = wallets[0]?.address;
+  const { user, logout, isInMiniApp } = useAuthContext();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const { toggleSidebar } = useSidebarContext();
-
-  // Check if Farcaster is connected
-  const hasFarcaster =
-    privyUser?.linkedAccounts?.some(
-      (account) => account.type === "farcaster"
-    ) || false;
-
-  // Check if Farcaster is enabled in Privy config (temporary check)
-  const farcasterEnabled = process.env.NEXT_PUBLIC_FARCASTER_ENABLED === "true";
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -54,106 +36,16 @@ export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
     };
   }, [showDropdown]);
 
-  // Format wallet address
-  const formatAddress = (address: string) => {
-    return `${address.slice(0, 6)}...${address.slice(-4)}`;
-  };
-
   // Get user display name
   const getUserDisplay = () => {
     if (user?.displayName) return user.displayName;
-    if (user?.email) return user.email;
-    return user?.privyUserId || "minidev_user";
+    if (user?.username) return `@${user.username}`;
+    return user?.farcasterFid ? `FID: ${user.farcasterFid}` : "minidev_user";
   };
 
   // Get user profile picture URL
   const getUserPfpUrl = () => {
     return user?.pfpUrl;
-  };
-
-  const handleLinkFarcaster = async () => {
-    try {
-      console.log("🔗 [Farcaster] Starting link process...");
-      console.log("🔗 [Farcaster] Current user state before linking:", {
-        displayName: user?.displayName,
-        pfpUrl: user?.pfpUrl,
-        email: user?.email,
-      });
-      console.log(
-        "🔗 [Farcaster] Privy linkedAccounts before:",
-        privyUser?.linkedAccounts?.map((acc) => ({ type: acc.type }))
-      );
-
-      await linkFarcaster();
-
-      console.log("✅ [Farcaster] Link successful!");
-      console.log(
-        "🔗 [Farcaster] Privy linkedAccounts after:",
-        privyUser?.linkedAccounts?.map((acc) => ({ type: acc.type }))
-      );
-
-      setShowDropdown(false);
-      // The useAuth hook will automatically detect the new linked account
-      // and refresh the user data
-    } catch (error) {
-      console.error("❌ [Farcaster] Failed to link:", error);
-      // Show user-friendly error message
-      alert(
-        "Unable to connect Farcaster. Please make sure:\n1. Farcaster is enabled in your Privy Dashboard\n2. You have the Warpcast app installed\n3. Try refreshing the page"
-      );
-    }
-  };
-
-  const handleUnlinkFarcaster = async () => {
-    try {
-      console.log("🔓 [Farcaster] Starting unlink process...");
-      console.log("🔓 [Farcaster] Current user state before unlinking:", {
-        displayName: user?.displayName,
-        pfpUrl: user?.pfpUrl,
-        email: user?.email,
-      });
-      console.log(
-        "🔓 [Farcaster] Current wallets:",
-        wallets.map((w) => ({
-          address: w.address,
-          walletClientType: w.walletClientType,
-        }))
-      );
-
-      // Get the Farcaster account - unlinkFarcaster expects the FID (Farcaster ID) as a number
-      const farcasterAccount = privyUser?.linkedAccounts?.find(
-        (account) => account.type === "farcaster"
-      ) as { type: string; fid?: number } | undefined;
-
-      console.log("🔓 [Farcaster] Found Farcaster account:", farcasterAccount);
-
-      if (farcasterAccount && farcasterAccount.fid) {
-        console.log("🔓 [Farcaster] Unlinking FID:", farcasterAccount.fid);
-        await unlinkFarcaster(farcasterAccount.fid);
-
-        console.log("✅ [Farcaster] Unlink successful!");
-        console.log(
-          "🔓 [Farcaster] Privy linkedAccounts after:",
-          privyUser?.linkedAccounts?.map((acc) => ({ type: acc.type }))
-        );
-        console.log(
-          "🔓 [Farcaster] Wallets after unlink:",
-          wallets.map((w) => ({
-            address: w.address,
-            walletClientType: w.walletClientType,
-          }))
-        );
-
-        setShowDropdown(false);
-        // Note: Embedded wallets created during Farcaster login will remain
-        // as they serve as the user's authentication method
-        // The useAuth hook will automatically detect the unlinked account
-        // and refresh the user data (pfpUrl will be cleared)
-      }
-    } catch (error) {
-      console.error("❌ [Farcaster] Failed to unlink:", error);
-      alert("Unable to disconnect Farcaster. Please try again.");
-    }
   };
 
   const handleLogout = () => {
@@ -214,15 +106,10 @@ export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
               <span className="text-sm font-medium text-black">
                 {getUserDisplay()}
               </span>
-              {walletAddress && (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-xs text-black-60 font-mono">
-                    {formatAddress(walletAddress)}
-                  </span>
-                  <span className="inline-block px-2 py-0.5 bg-blue-100 text-blue-700 text-[10px] rounded-full font-medium">
-                    Base
-                  </span>
-                </div>
+              {user?.username && user?.displayName && (
+                <span className="text-xs text-gray-500">
+                  @{user.username}
+                </span>
               )}
             </div>
             {/* Dropdown Arrow */}
@@ -246,23 +133,25 @@ export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
           {/* Dropdown Menu */}
           {showDropdown && (
             <div className="absolute top-full left-0 mt-2 w-64 bg-white border border-gray-200 rounded-lg shadow-lg py-2 z-50">
-              {/* Disconnect Farcaster - Only show if enabled and connected */}
-              {hasFarcaster && farcasterEnabled && (
-                <button
-                  onClick={handleUnlinkFarcaster}
-                  className="w-full px-4 py-2.5 flex items-center gap-3 hover:bg-purple-50 transition-colors text-left border-b border-gray-100"
-                >
-                  <Image
-                    src="/farcaster.svg"
-                    alt="Farcaster"
-                    width={20}
-                    height={20}
-                    className="w-5 h-5"
-                  />
-                  <span className="text-sm font-medium text-gray-700">
-                    Disconnect Farcaster
+              {/* Farcaster Profile Info */}
+              {isInMiniApp && user?.farcasterFid && (
+                <div className="px-4 py-2.5 border-b border-gray-100">
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src="/farcaster.svg"
+                      alt="Farcaster"
+                      width={16}
+                      height={16}
+                      className="w-4 h-4"
+                    />
+                    <span className="text-xs text-gray-500">
+                      Connected via Farcaster
+                    </span>
+                  </div>
+                  <span className="text-xs text-gray-400 mt-1 block">
+                    FID: {user.farcasterFid}
                   </span>
-                </button>
+                </div>
               )}
 
               {/* Logout Option */}
@@ -290,23 +179,18 @@ export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
         </div>
       </div>
 
-      {/* Connect Farcaster Button - Only show if enabled and not connected */}
-      {!hasFarcaster && farcasterEnabled && (
-      <Button
-        variant="outline"
-        size="sm"
-        onClick={handleLinkFarcaster}
-        className="text-nowrap border border-[#8A63D280] hover:bg-[#8A63D2]/10 text-[#8A63D2] text-sm font-medium rounded-full transition-colors flex items-center gap-2"
-      >
-        <Image
-          src="/farcaster.svg"
-          alt="Farcaster"
-          width={16}
-          height={16}
-          className="w-4 h-4"
-        />
-        Connect Farcaster
-      </Button>
+      {/* Farcaster Badge */}
+      {isInMiniApp && (
+        <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 rounded-full">
+          <Image
+            src="/farcaster.svg"
+            alt="Farcaster"
+            width={16}
+            height={16}
+            className="w-4 h-4"
+          />
+          <span className="text-xs font-medium text-purple-700">Miniapp</span>
+        </div>
       )}
     </div>
   );

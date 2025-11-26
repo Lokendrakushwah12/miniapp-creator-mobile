@@ -1,12 +1,12 @@
 import { logger } from "./logger";
 import { NextRequest, NextResponse } from "next/server";
-import { getUserBySessionToken, getUserByPrivyId, createUser, createUserSession, updateUser } from "./database";
+import { getUserBySessionToken, getUserByFarcasterFid, createUser, createUserSession, updateUser } from "./database";
 import { v4 as uuidv4 } from "uuid";
 
 export interface User {
   id: string;
-  privyUserId: string;
-  email?: string;
+  farcasterFid: string;
+  username?: string;
   displayName?: string;
   pfpUrl?: string;
 }
@@ -57,8 +57,8 @@ export async function authenticateRequest(request: NextRequest): Promise<{
     return {
       user: {
         id: user.id,
-        privyUserId: user.privyUserId,
-        email: user.email ?? undefined,
+        farcasterFid: user.farcasterFid,
+        username: user.username ?? undefined,
         displayName: user.displayName ?? undefined,
         pfpUrl: user.pfpUrl ?? undefined,
       },
@@ -74,9 +74,9 @@ export async function authenticateRequest(request: NextRequest): Promise<{
   }
 }
 
-export async function authenticatePrivyUser(
-  privyUserId: string, 
-  email?: string, 
+export async function authenticateFarcasterUser(
+  farcasterFid: string, 
+  username?: string, 
   displayName?: string, 
   pfpUrl?: string
 ): Promise<
@@ -84,34 +84,34 @@ export async function authenticatePrivyUser(
   | { success: false; error: string }
 > {
   try {
-    console.log('🔐 [auth.ts] authenticatePrivyUser called with:', {
-      privyUserId,
-      email,
+    console.log('🔐 [auth.ts] authenticateFarcasterUser called with:', {
+      farcasterFid,
+      username,
       displayName,
       pfpUrl
     });
     
     // Check if user exists, create if not
-    let user = await getUserByPrivyId(privyUserId);
+    let user = await getUserByFarcasterFid(farcasterFid);
     
     console.log('🔍 [auth.ts] Existing user found:', user ? {
       id: user.id,
       displayName: user.displayName,
       pfpUrl: user.pfpUrl,
-      email: user.email
+      username: user.username
     } : null);
     
     if (!user) {
       try {
         // Create new user automatically
         console.log('➕ [auth.ts] Creating new user...');
-        user = await createUser(privyUserId, email, displayName, pfpUrl);
+        user = await createUser(farcasterFid, username, displayName, pfpUrl);
         logger.log(`✅ Created new user: ${user.id}`);
       } catch (createError: unknown) {
         // Handle duplicate key constraint - user was created by another request
-        if ((createError as { code?: string; constraint?: string })?.code === '23505' && (createError as { code?: string; constraint?: string })?.constraint === 'users_privy_user_id_unique') {
-          logger.log(`⚠️ User already exists (race condition), fetching existing user: ${privyUserId}`);
-          user = await getUserByPrivyId(privyUserId);
+        if ((createError as { code?: string; constraint?: string })?.code === '23505' && (createError as { code?: string; constraint?: string })?.constraint === 'users_farcaster_fid_unique') {
+          logger.log(`⚠️ User already exists (race condition), fetching existing user: ${farcasterFid}`);
+          user = await getUserByFarcasterFid(farcasterFid);
           if (!user) {
             throw new Error("Failed to create or fetch user");
           }
@@ -121,21 +121,21 @@ export async function authenticatePrivyUser(
       }
     } else {
       // User exists - update their profile information if new data is provided
-      const updates: { email?: string; displayName?: string; pfpUrl?: string } = {};
+      const updates: { username?: string; displayName?: string; pfpUrl?: string } = {};
       
       console.log('🔄 [auth.ts] Comparing values for updates:', {
-        email: { new: email, old: user.email, different: email !== user.email },
+        username: { new: username, old: user.username, different: username !== user.username },
         displayName: { new: displayName, old: user.displayName, different: displayName !== user.displayName },
         pfpUrl: { new: pfpUrl, old: user.pfpUrl, different: pfpUrl !== user.pfpUrl }
       });
       
-      if (email && email !== user.email) {
-        updates.email = email;
+      if (username && username !== user.username) {
+        updates.username = username;
       }
       if (displayName && displayName !== user.displayName) {
         updates.displayName = displayName;
       }
-      // Allow pfpUrl to be set to undefined to clear it when disconnecting Farcaster
+      // Allow pfpUrl to be updated
       if (pfpUrl !== user.pfpUrl) {
         updates.pfpUrl = pfpUrl;
       }
@@ -150,7 +150,7 @@ export async function authenticatePrivyUser(
           id: user.id,
           displayName: user.displayName,
           pfpUrl: user.pfpUrl,
-          email: user.email
+          username: user.username
         });
         logger.log(`✅ Updated user profile: ${user.id}`, updates);
       } else {
@@ -162,12 +162,12 @@ export async function authenticatePrivyUser(
       id: user.id,
       displayName: user.displayName,
       pfpUrl: user.pfpUrl,
-      email: user.email
+      username: user.username
     });
 
     // Create session token
     const sessionToken = uuidv4();
-    const expiresAt = new Date(Date.now() + 1 * 60 * 60 * 1000); // 1 hour
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours for Farcaster sessions
 
     await createUserSession(user.id, sessionToken, expiresAt);
 
@@ -175,8 +175,8 @@ export async function authenticatePrivyUser(
       success: true as const,
       user: {
         id: user.id,
-        privyUserId: user.privyUserId,
-        email: user.email ?? undefined,
+        farcasterFid: user.farcasterFid,
+        username: user.username ?? undefined,
         displayName: user.displayName ?? undefined,
         pfpUrl: user.pfpUrl ?? undefined,
       },
@@ -187,7 +187,7 @@ export async function authenticatePrivyUser(
     
     return returnData;
   } catch (error) {
-    logger.error("Privy authentication error:", error);
+    logger.error("Farcaster authentication error:", error);
     return {
       success: false as const,
       error: "Authentication failed"

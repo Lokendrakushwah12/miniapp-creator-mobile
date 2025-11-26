@@ -1,12 +1,13 @@
 "use client";
 import { logger } from '@/lib/logger';
 
-import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import type { EarnKit, UserBalance } from "@earnkit/earn";
 import TopUpDialog from "./top-up-dialog";
 import { Button } from "./ui/button";
-import WalletButton from "./WalletButton";
+import { useAuthContext } from "@/contexts/AuthContext";
+import sdk from "@farcaster/miniapp-sdk";
+import { useState, useEffect } from "react";
 
 interface BalanceDisplayProps {
     activeAgent: EarnKit;
@@ -14,22 +15,44 @@ interface BalanceDisplayProps {
 }
 
 export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDisplayProps) {
-    const { ready, authenticated, linkWallet } = usePrivy();
-    const { wallets } = useWallets();
-    const walletAddress = wallets[0]?.address;
+    const { isAuthenticated, isInMiniApp } = useAuthContext();
+    const [walletAddress, setWalletAddress] = useState<string | null>(null);
+    const [isLoadingWallet, setIsLoadingWallet] = useState(true);
 
-    // Check if user only has embedded wallet
-    const hasOnlyEmbeddedWallet = wallets.length > 0 && 
-        wallets.every(w => w.walletClientType === 'privy');
+    // Get wallet address from Farcaster SDK
+    useEffect(() => {
+        const getWalletAddress = async () => {
+            if (!isInMiniApp) {
+                setIsLoadingWallet(false);
+                return;
+            }
+
+            try {
+                // Use Farcaster SDK's Ethereum provider to get the wallet address
+                const provider = sdk.wallet.ethProvider;
+                if (provider) {
+                    const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
+                    if (accounts && accounts.length > 0) {
+                        setWalletAddress(accounts[0]);
+                    }
+                }
+            } catch (error) {
+                logger.log('Failed to get wallet address from Farcaster:', error);
+            } finally {
+                setIsLoadingWallet(false);
+            }
+        };
+
+        getWalletAddress();
+    }, [isInMiniApp]);
 
     logger.log('💰 BalanceDisplay render:', {
-        ready,
-        authenticated,
-        hasWallet: !!wallets[0],
+        isAuthenticated,
+        isInMiniApp,
         walletAddress: walletAddress ? `${walletAddress.substring(0, 6)}...` : 'none',
         feeModelType,
         hasActiveAgent: !!activeAgent,
-        hasOnlyEmbeddedWallet
+        isLoadingWallet
     });
 
     // Balance fetching with React Query (only if activeAgent exists)
@@ -39,7 +62,7 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
             if (!walletAddress || !activeAgent) throw new Error("Wallet not connected or agent not available");
             return activeAgent.getBalance({ walletAddress });
         },
-        enabled: !!activeAgent && !!walletAddress && ready && authenticated,
+        enabled: !!activeAgent && !!walletAddress && isAuthenticated,
         placeholderData: { eth: "0", credits: "0" },
         staleTime: 1000 * 30, // 30 seconds
         refetchInterval: 1000 * 60, // Refetch every minute
@@ -50,30 +73,34 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
         refetchBalance();
     };
 
-    // If no activeAgent (credits disabled), just show wallet button for auth
+    // If no activeAgent (credits disabled), show nothing
     if (!activeAgent) {
-        return <WalletButton />;
+        return null;
     }
 
-    // Show wallet button if not authenticated
-    if (!ready || !authenticated || !walletAddress) {
-        return <WalletButton />;
+    // Show loading state
+    if (isLoadingWallet) {
+        return (
+            <div className="flex items-center gap-2">
+                <span className="text-sm text-black-60">Loading...</span>
+            </div>
+        );
+    }
+
+    // Show message if not in miniapp or no wallet
+    if (!isInMiniApp || !walletAddress) {
+        return (
+            <div className="flex items-center gap-2">
+                <span className="text-sm text-black-60">
+                    {!isInMiniApp ? "Open in Warpcast" : "No wallet connected"}
+                </span>
+            </div>
+        );
     }
 
     // Show balance and top-up when authenticated and credits enabled
     return (
         <div className="flex items-center gap-3">
-            {hasOnlyEmbeddedWallet && (
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={linkWallet}
-                    className="px-3 py-1.5 text-xs font-medium text-black-60 transition-colors cursor-pointer"
-                    title="Currently using temporary wallet. Click to connect your own wallet (MetaMask, Coinbase, etc.)"
-                >
-                    Connect Wallet
-                </Button>
-            )}
             <div className="flex items-center gap-2">
                 <span className="text-sm text-black-60">
                     Balance: {loading ? "..." : balance ? `${balance.credits} Credits` : "0 Credits"}
@@ -95,5 +122,3 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
         </div>
     );
 }
-
-

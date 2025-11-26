@@ -13,12 +13,12 @@ import Image from "next/image";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useAuthContext } from "@/contexts/AuthContext";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import type { EarnKit } from "@earnkit/earn";
 import { toast } from "react-hot-toast";
 import { TextShimmer } from "./text-shimmer";
 import { Button } from "./ui/button";
+import sdk from "@farcaster/miniapp-sdk";
 
 interface GeneratedProject {
   projectId: string;
@@ -61,17 +61,35 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
   ) {
     const [prompt, setPrompt] = useState("");
     const [isGenerating, setIsGenerating] = useState(false);
-    // const [error, setError] = useState<string | null>(null);
     const [chat, setChat] = useState<ChatMessage[]>([]);
     const [aiLoading, setAiLoading] = useState(false);
     const [hasShownWarning, setHasShownWarning] = useState(false);
+    const [walletAddress, setWalletAddress] = useState<string | null>(null);
     const chatBottomRef = useRef<HTMLDivElement>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const { sessionToken, user } = useAuthContext();
-    const { ready: privyReady, authenticated } = usePrivy();
-    const { wallets } = useWallets();
+    const { sessionToken, user, isAuthenticated, isInMiniApp } = useAuthContext();
     const queryClient = useQueryClient();
-    const walletAddress = wallets[0]?.address;
+
+    // Get wallet address from Farcaster SDK
+    useEffect(() => {
+      const getWalletAddress = async () => {
+        if (!isInMiniApp) return;
+
+        try {
+          const provider = sdk.wallet.ethProvider;
+          if (provider) {
+            const accounts = await provider.request({ method: 'eth_accounts' }) as string[];
+            if (accounts && accounts.length > 0) {
+              setWalletAddress(accounts[0]);
+            }
+          }
+        } catch (error) {
+          logger.log('Failed to get wallet address from Farcaster:', error);
+        }
+      };
+
+      getWalletAddress();
+    }, [isInMiniApp]);
 
     // Check user's credit balance
     const { data: balance } = useQuery({
@@ -81,7 +99,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           throw new Error("Wallet not connected");
         return activeAgent.getBalance({ walletAddress });
       },
-      enabled: !!walletAddress && !!activeAgent && privyReady && authenticated,
+      enabled: !!walletAddress && !!activeAgent && isAuthenticated,
       placeholderData: { eth: "0", credits: "0" },
       staleTime: 1000 * 30,
     });
@@ -298,8 +316,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       setPrompt(""); // Clear input immediately
       setAiLoading(true);
 
-      // setError(null);
-
       // Add user message immediately
       const userMsg: ChatMessage = {
         role: "user",
@@ -309,15 +325,11 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       };
       setChat((prev) => [...prev, userMsg]);
 
-      // User message will be saved to database by the chat API
-
       // Credit tracking - handled entirely server-side to prevent double charging
-      // Previously, both client and server were tracking credits, causing double charges
-      const walletAddress = wallets[0]?.address;
+      const currentWalletAddress = walletAddress;
 
       try {
         // Credit validation and tracking is now done server-side only in /api/chat
-        // This fixes the bug where users were charged 2x per message
         const endpoint = "/api/chat";
         const body: {
           sessionId: string;
@@ -331,7 +343,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           message: userMessage,
           stream: false,
           projectId: currentProject?.projectId,
-          walletAddress: walletAddress, // Send wallet address for server-side validation
+          walletAddress: currentWalletAddress || undefined, // Send wallet address for server-side validation
         };
 
         // Determine the appropriate action based on current phase
@@ -644,8 +656,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         };
         setChat((prev) => [...prev, aiMsg]);
 
-        // AI message will be saved to database by the chat API
-
         // Check if we should transition to building phase
         // Only allow generation in requirements phase
         if (currentPhase === "requirements" && !isGenerating) {
@@ -707,10 +717,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       } catch (err) {
         logger.error("Error:", err);
 
-        // Credits are only captured server-side on successful completion
-        // If the call fails, server won't capture the tracked credits
-
-        // setError(err instanceof Error ? err.message : 'An error occurred');
         setChat((prev) => [
           ...prev,
           {
@@ -831,7 +837,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       logger.log("🚀 Starting project generation...");
       setIsGenerating(true);
 
-      // setError(null);
       try {
         logger.log(
           "🚀 Generating project with prompt:",
@@ -969,9 +974,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           chatProjectIdMatches: project.projectId === chatProjectId,
         });
 
-        // Chat messages are already in the right place! No migration needed
-        // because /api/chat created the project first and saved messages there
-
         logger.log("✅ Generation complete, updating UI state...");
         onProjectGenerated(project);
         logger.log("✅ Project state updated via onProjectGenerated");
@@ -1024,7 +1026,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         let displayMessage = errorMessage;
         if (errorMessage.includes("Deployment failed")) {
           // Extract the specific error from deployment failure message
-          // Try both patterns: "Deployment failed after N attempts: error" and "Deployment failed: error"
           const matchWithAttempts = errorMessage.match(
             /Deployment failed after \d+ attempts: (.+)/
           );
@@ -1043,7 +1044,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           }
         }
 
-        // setError(errorMessage);
         setChat((prev) => [
           ...prev,
           {
@@ -1102,43 +1102,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
       };
     }, []);
 
-    // const handleCleanup = async () => {
-    //     if (!currentProject) return;
-    //     try {
-    //         await fetch('/api/generate', {
-    //             method: 'DELETE',
-    //             headers: { 'Content-Type': 'application/json' },
-    //             body: JSON.stringify({ projectId: currentProject.projectId }),
-    //         });
-    //         onProjectGenerated(null);
-    //         setChat([]);
-    //         setCurrentPhase('requirements');
-    //     } catch (error) {
-    //         logger.error('Failed to cleanup project:', error);
-    //     }
-    // };
-
-    // const handleResetChat = () => {
-    //     setChat([]);
-    //     setCurrentPhase('requirements');
-    //     onProjectGenerated(null);
-    //     setPrompt('');
-    //     setError(null);
-    // };
-
-    // const getPhaseBadge = (phase: string) => {
-    //     switch (phase) {
-    //     case 'requirements':
-    //         return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-black-10 text-black">Planning</span>;
-    //     case 'building':
-    //         return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-black-20 text-black">Building</span>;
-    //     case 'editing':
-    //         return <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-black-30 text-black">Editing</span>;
-    //     default:
-    //         return null;
-    //     }
-    // };
-
     return (
       <div className="flex-1 w-full flex flex-col bg-[#0000000A] max-h-full">
         {/* Chat Messages */}
@@ -1172,9 +1135,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                       : "bg-transparent text-black px-0!"
                   }`}
                 >
-                  {/* <div className="flex items-center gap-2 mb-1">
-                                    {msg.phase && getPhaseBadge(msg.phase)}
-                                </div> */}
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     components={{
@@ -1271,7 +1231,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0 mt-1">
                       <span className="text-white font-medium text-xs">
                         {user?.displayName?.charAt(0).toUpperCase() ||
-                          user?.email?.charAt(0).toUpperCase() ||
+                          user?.username?.charAt(0).toUpperCase() ||
                           "U"}
                       </span>
                     </div>
@@ -1364,19 +1324,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
             }}
             className="bg-transparent text-black rounded-3xl p-2 border-2 mb-2 flex flex-col items-center gap-1"
           >
-            {/* <input
-                        value={prompt}
-                        onChange={e => setPrompt(e.target.value)}
-                        placeholder={
-                            currentPhase === 'requirements'
-                                ? "Ask Minidev"
-                                : currentPhase === 'building'
-                                    ? "Ask Minidev"
-                                    : "Ask Minidev"
-                        }
-                        className="flex-1 resize-none p-2 px-4 bg-transparent rounded-lg border-none focus:outline-none focus:border-none font-funnel-sans text-black-80 font-semibold"
-                        disabled={aiLoading || isGenerating}
-                    /> */}
             <textarea
               ref={textareaRef}
               value={prompt}
@@ -1441,27 +1388,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
           <p className="text-xs text-gray-400 text-center">
             Outputs are auto-generated — please review before deploying.
           </p>
-
-          {/* Project Controls */}
-          {/* {currentProject && (
-                    <div className="mx-4 mb-4 p-3 bg-black-10 rounded-md border border-black-20">
-                        <div className="flex items-center justify-between">
-                            <span className="text-sm text-black">Project Active</span>
-                            <button
-                                onClick={handleCleanup}
-                                className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 transition-colors"
-                            >
-                                Stop Server
-                            </button>
-                        </div>
-                    </div>
-                )} */}
-
-          {/* {error && (
-                    <div className="mx-4 mb-4 p-3 bg-red-900 border border-red-700 rounded-md">
-                        <p className="text-red-300 text-sm">{error}</p>
-                    </div>
-                )} */}
         </div>
       </div>
     );
