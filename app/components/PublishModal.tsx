@@ -3,7 +3,6 @@ import { logger } from "../../lib/logger";
 import { useState, useEffect, useRef } from 'react';
 import { useAuthContext } from '../contexts/AuthContext';
 import { sdk } from '@farcaster/miniapp-sdk';
-import { useUser } from '../hooks/useUser';
 
 interface PublishModalProps {
     isOpen: boolean;
@@ -153,9 +152,8 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
     const [splashBackgroundColor, setSplashBackgroundColor] = useState('#ffffff');
     const [primaryCategory, setPrimaryCategory] = useState('');
     
-    // Get authentication from context
-    const { sessionToken, isAuthenticated } = useAuthContext();
-    const { isMiniApp, isLoading: userLoading } = useUser();
+    // Get authentication from context (includes isInMiniApp check)
+    const { sessionToken, isAuthenticated, isInMiniApp, isLoading: authLoading } = useAuthContext();
 
     // HomeUrl is always the project URL - uneditable
     const homeUrl = projectUrl || '';
@@ -177,7 +175,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
 
     // Handle the full publish flow with account association
     const handlePublish = async () => {
-        logger.log('handlePublish called with:', { projectId, projectUrl, isMiniApp });
+        logger.log('handlePublish called with:', { projectId, projectUrl, isInMiniApp });
 
         // Validate required form fields
         if (!appName.trim()) {
@@ -225,7 +223,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
             return;
         }
 
-        if (!isMiniApp) {
+        if (!isInMiniApp) {
             setError('Publishing requires running in a Farcaster miniapp to sign the manifest.');
             return;
         }
@@ -409,7 +407,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                             )}
 
                             {/* MiniApp Warning */}
-                            {!userLoading && !isMiniApp && (
+                            {!authLoading && !isInMiniApp && (
                                 <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
                                     <p className="text-sm text-orange-800 font-medium">
                                         ⚠️ Publishing requires running inside a Farcaster miniapp to sign your manifest.
@@ -700,7 +698,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                 disabled={
                                     isLoading ||
                                     !isAuthenticated ||
-                                    !isMiniApp ||
+                                    !isInMiniApp ||
                                     !appName.trim() ||
                                     !iconUrl.trim() ||
                                     !homeUrl.trim() ||
@@ -713,7 +711,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                 className={`px-6 py-2 bg-black text-white rounded-lg font-medium transition-colors ${
                                     isLoading ||
                                     !isAuthenticated ||
-                                    !isMiniApp ||
+                                    !isInMiniApp ||
                                     !appName.trim() ||
                                     !iconUrl.trim() ||
                                     !homeUrl.trim() ||
@@ -728,7 +726,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                 title={
                                     !isAuthenticated
                                         ? 'Please sign in first'
-                                        : !isMiniApp
+                                        : !isInMiniApp
                                             ? 'Must be running in Farcaster miniapp'
                                             : (!appName.trim() ||
                                                !iconUrl.trim() ||
@@ -742,7 +740,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                                 : 'Publish to Farcaster'
                                 }
                             >
-                                {!isAuthenticated ? 'Sign In Required' : !isMiniApp ? 'Farcaster Required' : 'Publish & Sign'}
+                                {!isAuthenticated ? 'Sign In Required' : !isInMiniApp ? 'Farcaster Required' : 'Publish & Sign'}
                             </button>
                         </>
                     )}

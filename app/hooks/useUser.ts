@@ -13,11 +13,12 @@ export function useUser() {
   useEffect(() => {
     const checkMiniApp = async () => {
       try {
-        // Check if we're in a miniapp context
-        const context = await sdk.context;
-        const contextWithClient = context as { client?: { platformType?: string } };
-        setIsMiniApp(contextWithClient?.client?.platformType === 'miniapp' || false);
-      } catch {
+        // Use the official SDK method to check if we're in a miniapp
+        const inMiniApp = await sdk.isInMiniApp();
+        console.log('📱 [useUser] Is in MiniApp:', inMiniApp);
+        setIsMiniApp(inMiniApp);
+      } catch (error) {
+        console.log('⚠️ [useUser] Error checking miniapp status:', error);
         // If SDK fails, we're not in a miniapp
         setIsMiniApp(false);
       } finally {
@@ -30,4 +31,3 @@ export function useUser() {
 
   return { isMiniApp, isLoading };
 }
-
