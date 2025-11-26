@@ -94,6 +94,47 @@ async function writeFilesToDir(
   }
 }
 
+// Helper: fetch with retry logic for network errors
+async function fetchWithRetry(
+  url: string, 
+  options: RequestInit = {}, 
+  maxRetries = 3,
+  baseDelay = 1000
+): Promise<Response> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      const response = await fetch(url, options);
+      return response;
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      const errorMessage = lastError.message;
+      
+      // Check if it's a retryable network error
+      const isRetryable = 
+        errorMessage.includes('ECONNRESET') ||
+        errorMessage.includes('ETIMEDOUT') ||
+        errorMessage.includes('ENOTFOUND') ||
+        errorMessage.includes('ECONNREFUSED') ||
+        errorMessage.includes('fetch failed') ||
+        errorMessage.includes('network') ||
+        errorMessage.includes('socket');
+      
+      if (!isRetryable || attempt === maxRetries) {
+        throw lastError;
+      }
+      
+      const delay = baseDelay * Math.pow(2, attempt - 1); // Exponential backoff
+      logger.warn(`⚠️ Network error on attempt ${attempt}/${maxRetries}: ${errorMessage}`);
+      logger.log(`   Retrying in ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  
+  throw lastError || new Error('Fetch failed after all retries');
+}
+
 // Utility: Fetch boilerplate from GitHub API
 async function fetchBoilerplateFromGitHub(targetDir: string) {
   const repoOwner = "chetankashetti";
@@ -113,7 +154,8 @@ async function fetchBoilerplateFromGitHub(targetDir: string) {
       headers['Authorization'] = `token ${process.env.GITHUB_TOKEN}`;
     }
     
-    const response = await fetch(url, { headers });
+    // Use fetchWithRetry instead of plain fetch for resilience
+    const response = await fetchWithRetry(url, { headers });
     
     if (!response.ok) {
       throw new Error(`GitHub API error: ${response.status} ${response.statusText}`);
@@ -143,25 +185,30 @@ async function fetchBoilerplateFromGitHub(targetDir: string) {
       }
       
       if (item.type === "file") {
-        // Fetch file content
-        const fileResponse = await fetch(item.download_url);
-        if (!fileResponse.ok) {
-          logger.warn(`⚠️ Failed to fetch file ${itemPath}: ${fileResponse.status}`);
+        // Fetch file content with retry logic
+        try {
+          const fileResponse = await fetchWithRetry(item.download_url, {});
+          if (!fileResponse.ok) {
+            logger.warn(`⚠️ Failed to fetch file ${itemPath}: ${fileResponse.status}`);
+            continue;
+          }
+          
+          const content = await fileResponse.text();
+          
+          // Check for binary content
+          if (content.includes('\0') || content.includes('\x00')) {
+            logger.log(`⚠️ Skipping binary file: ${itemPath}`);
+            continue;
+          }
+          
+          // Write file to target directory
+          const filePath = path.join(targetDir, itemPath);
+          await fs.ensureDir(path.dirname(filePath));
+          await fs.writeFile(filePath, content, "utf8");
+        } catch (fileError) {
+          logger.warn(`⚠️ Failed to fetch file ${itemPath} after retries: ${fileError}`);
           continue;
         }
-        
-        const content = await fileResponse.text();
-        
-        // Check for binary content
-        if (content.includes('\0') || content.includes('\x00')) {
-          logger.log(`⚠️ Skipping binary file: ${itemPath}`);
-          continue;
-        }
-        
-        // Write file to target directory
-        const filePath = path.join(targetDir, itemPath);
-        await fs.ensureDir(path.dirname(filePath));
-        await fs.writeFile(filePath, content, "utf8");
         
       } else if (item.type === "dir") {
         // Recursively fetch directory contents
