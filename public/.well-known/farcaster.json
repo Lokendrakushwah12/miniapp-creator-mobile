@@ -2,12 +2,12 @@
   "frame": {
     "name": "my app",
     "version": "1",
-    "iconUrl": "https://miniapp-creator-mobile-olive.vercel.app/icon.png",
-    "homeUrl": "https://miniapp-creator-mobile-olive.vercel.app/",
-    "imageUrl": "https://miniapp-creator-mobile-olive.vercel.app/image.png",
-    "splashImageUrl": "https://miniapp-creator-mobile-olive.vercel.app/splash.png",
+    "iconUrl": "https://miniapp.minidev.fun/icon.png",
+    "homeUrl": "https://miniapp.minidev.fun/",
+    "imageUrl": "https://miniapp.minidev.fun/image.png",
+    "splashImageUrl": "https://miniapp.minidev.fun/splash.png",
     "splashBackgroundColor": "#ffffff",
-    "webhookUrl": "https://miniapp-creator-mobile-olive.vercel.app/api/webhook",
+    "webhookUrl": "https://miniapp.minidev.fun/api/webhook",
     "subtitle": "my subtitle",
     "description": "my descrip",
     "primaryCategory": "social"
