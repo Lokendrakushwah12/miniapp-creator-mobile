@@ -2,122 +2,44 @@
 
 import Image from 'next/image';
 
-interface TemplateOption {
-  id: string;
-  title: string;
-  description: string;
-  logo: string;
-  appType: 'farcaster' | 'web3';
-}
-
-interface TemplateSelectorProps {
-  selectedAppType: 'farcaster' | 'web3';
-  onSelectTemplate: (appType: 'farcaster' | 'web3') => void;
-}
-
-const templateOptions: TemplateOption[] = [
-  {
-    id: "farcaster-miniapp",
-    title: "Farcaster Miniapp",
-    description: "Create and Launch an app that runs inside Farcaster.",
-    logo: "/farcaster.svg",
-    appType: 'farcaster',
-  },
-  {
-    id: "base-webapp",
-    title: "Web3 App",
-    description: "Create a web app deployed on Base mainnet.",
-    logo: "/base-logo.svg",
-    appType: 'web3',
-  },
-];
-
-export function TemplateSelector({ selectedAppType, onSelectTemplate }: TemplateSelectorProps) {
+export function TemplateSelector() {
   return (
-    <div className="w-full max-w-2xl mx-auto">
+    <div className="w-full max-w-md mx-auto">
       <div className="text-center mb-8">
         <div className="mb-4 flex justify-center">
-          <div className="w-16 h-16 bg-black rounded-2xl flex items-center justify-center">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-              <path d="M20 8V32M8 20H32" stroke="white" strokeWidth="3" strokeLinecap="round"/>
-            </svg>
+          <div className="w-20 h-20 rounded-2xl overflow-hidden shadow-lg">
+            <Image 
+              src="/farcaster.svg" 
+              alt="Farcaster" 
+              width={80} 
+              height={80}
+              className="w-full h-full"
+            />
           </div>
         </div>
-        <h2 className="text-2xl font-bold text-black mb-2">Choose Your Build</h2>
-        <p className="text-sm text-black-60">
-          Select a app template to start building your web3 app.
+        <h2 className="text-2xl font-bold text-black mb-2">Build a Farcaster Miniapp</h2>
+        <p className="text-sm text-gray-600">
+          Describe your app idea and we&apos;ll build it for you. Your miniapp will run inside Farcaster.
         </p>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {templateOptions.map((template) => {
-          const isSelected = selectedAppType === template.appType;
-          return (
-            <button
-              key={template.id}
-              onClick={() => onSelectTemplate(template.appType)}
-              className={`group relative bg-white rounded-2xl p-6 text-left transition-all duration-200 flex flex-col gap-3 ${
-                isSelected 
-                  ? 'border-2 border-black shadow-lg ring-2 ring-black ring-opacity-10' 
-                  : 'border border-gray-200 hover:border-black-30 hover:shadow-lg'
-              }`}
-            >
-              {/* Icon and Title Row */}
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className={`w-12 h-12 rounded-xl flex items-center justify-center transition-all bg-gray-200`}>
-                    <Image
-                      src={template.logo}
-                      alt={template.title}
-                      width={24}
-                      height={24}
-                      className=""
-                    />
-                  </div>
-                  <h3 className="text-lg font-semibold text-black">{template.title}</h3>
-                </div>
-                {isSelected ? (
-                  <svg 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 20 20" 
-                    fill="none" 
-                    className="text-black"
-                  >
-                    <path 
-                      d="M16.667 5L7.5 14.167L3.333 10" 
-                      stroke="currentColor" 
-                      strokeWidth="2.5" 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                ) : (
-                  <svg 
-                    width="20" 
-                    height="20" 
-                    viewBox="0 0 20 20" 
-                    fill="none" 
-                    className="text-gray-400 group-hover:text-black transition-colors"
-                  >
-                    <path 
-                      d="M7.5 5L12.5 10L7.5 15" 
-                      stroke="currentColor" 
-                      strokeWidth="2" 
-                      strokeLinecap="round" 
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                )}
-              </div>
-
-              {/* Description */}
-              <p className="text-sm text-black-60 leading-relaxed">
-                {template.description}
-              </p>
-            </button>
-          );
-        })}
+      <div className="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-2xl p-5">
+        <div className="flex items-start gap-4">
+          <div className="flex-shrink-0 w-10 h-10 bg-purple-100 rounded-xl flex items-center justify-center">
+            <svg className="w-5 h-5 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" />
+            </svg>
+          </div>
+          <div>
+            <h3 className="text-sm font-semibold text-purple-900 mb-1">What can you build?</h3>
+            <ul className="text-sm text-purple-800 space-y-1">
+              <li>• Social apps & games</li>
+              <li>• Token-gated experiences</li>
+              <li>• NFT galleries & minting</li>
+              <li>• Community tools & bots</li>
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );

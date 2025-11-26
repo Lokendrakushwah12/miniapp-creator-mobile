@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 
 interface DevelopmentLogsProps {
     onComplete: () => void;
@@ -37,47 +37,130 @@ const TIPS = [
     }
 ];
 
+const STORAGE_KEY = 'minidev_generation_progress';
+const TOTAL_TIME = 10 * 60 * 1000; // 10 minutes
+
+// Helper to get or initialize start time from sessionStorage
+function getStoredState(): { startTime: number; tipIndex: number } | null {
+    try {
+        const stored = sessionStorage.getItem(STORAGE_KEY);
+        if (stored) {
+            return JSON.parse(stored);
+        }
+    } catch {
+        // Ignore errors
+    }
+    return null;
+}
+
+function setStoredState(state: { startTime: number; tipIndex: number }) {
+    try {
+        sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    } catch {
+        // Ignore errors
+    }
+}
+
+function clearStoredState() {
+    try {
+        sessionStorage.removeItem(STORAGE_KEY);
+    } catch {
+        // Ignore errors
+    }
+}
+
 export function DevelopmentLogs({ onComplete }: DevelopmentLogsProps) {
+    // Initialize state from sessionStorage to persist across focus changes
+    const [startTime] = useState<number>(() => {
+        const stored = getStoredState();
+        if (stored) {
+            return stored.startTime;
+        }
+        const now = Date.now();
+        setStoredState({ startTime: now, tipIndex: 0 });
+        return now;
+    });
+    
     const [currentStage, setCurrentStage] = useState(0);
-    const [progress, setProgress] = useState(0);
-    const [currentTipIndex, setCurrentTipIndex] = useState(0);
+    const [progress, setProgress] = useState(() => {
+        // Calculate initial progress based on elapsed time
+        const stored = getStoredState();
+        if (stored) {
+            const elapsed = Date.now() - stored.startTime;
+            return Math.min((elapsed / TOTAL_TIME) * 100, 100);
+        }
+        return 0;
+    });
+    const [currentTipIndex, setCurrentTipIndex] = useState(() => {
+        const stored = getStoredState();
+        return stored?.tipIndex || 0;
+    });
+    
+    // Track if component has completed to prevent double onComplete calls
+    const hasCompletedRef = useRef(false);
 
     useEffect(() => {
-        // Loading screen for 10 minutes - let actual generation happen in background
-        // This prevents browser TCP timeout issues and provides better UX
-        const totalTime = 10 * 60 * 1000; // 10 minutes - enough time to show project generation progress
-        let currentTime = 0;
+        // Calculate elapsed time since generation started
+        const elapsed = Date.now() - startTime;
+        const remainingTime = Math.max(TOTAL_TIME - elapsed, 0);
+        
+        // If already completed, call onComplete and clear storage
+        if (remainingTime <= 0 && !hasCompletedRef.current) {
+            hasCompletedRef.current = true;
+            clearStoredState();
+            onComplete();
+            return;
+        }
 
+        // Progress timer - update based on actual elapsed time
         const progressTimer = setInterval(() => {
-            currentTime += 100;
-            const newProgress = (currentTime / totalTime) * 100;
+            const currentElapsed = Date.now() - startTime;
+            const newProgress = (currentElapsed / TOTAL_TIME) * 100;
             setProgress(newProgress >= 100 ? 100 : newProgress);
         }, 100);
 
-        // Show stages gradually during the 10 minute window
-        const quickStageDurations = [60000, 70000, 80000, 90000, 70000, 60000, 50000, 40000, 80000]; // Total: 600 seconds (10 minutes)
+        // Calculate which stage we should be at based on elapsed time
+        const quickStageDurations = [60000, 70000, 80000, 90000, 70000, 60000, 50000, 40000, 80000];
         const stageTimeouts: NodeJS.Timeout[] = [];
 
         let cumulativeTime = 0;
         quickStageDurations.forEach((duration, index) => {
             cumulativeTime += duration;
-            const timeout = setTimeout(() => {
+            // Only set timeout if this stage hasn't been reached yet
+            if (cumulativeTime > elapsed) {
+                const timeout = setTimeout(() => {
+                    setCurrentStage(index + 1);
+                }, cumulativeTime - elapsed);
+                stageTimeouts.push(timeout);
+            } else {
+                // Already past this stage, set it immediately
                 setCurrentStage(index + 1);
-            }, cumulativeTime);
-            stageTimeouts.push(timeout);
+            }
         });
 
         // Rotate tips every 30 seconds (better pacing for longer animation)
         const tipRotation = setInterval(() => {
-            setCurrentTipIndex((prev) => (prev + 1) % TIPS.length);
+            setCurrentTipIndex((prev) => {
+                const newIndex = (prev + 1) % TIPS.length;
+                // Update stored tip index
+                const stored = getStoredState();
+                if (stored) {
+                    setStoredState({ ...stored, tipIndex: newIndex });
+                }
+                return newIndex;
+            });
         }, 30000);
 
         const completionTimer = setTimeout(() => {
-            clearInterval(progressTimer);
-            clearInterval(tipRotation);
-            stageTimeouts.forEach(clearTimeout);
-            onComplete(); // Hide loading, show preview - actual generation continues in background
-        }, totalTime);
+            if (!hasCompletedRef.current) {
+                hasCompletedRef.current = true;
+                clearInterval(progressTimer);
+                clearInterval(tipRotation);
+                stageTimeouts.forEach(clearTimeout);
+                clearStoredState();
+                onComplete(); // Hide loading, show preview - actual generation continues in background
+            }
+        }, remainingTime);
 
         return () => {
             clearTimeout(completionTimer);
@@ -85,7 +168,7 @@ export function DevelopmentLogs({ onComplete }: DevelopmentLogsProps) {
             clearInterval(tipRotation);
             stageTimeouts.forEach(clearTimeout);
         };
-    }, [onComplete]);
+    }, [onComplete, startTime]);
 
     // Calculate circular progress stroke
     const circumference = 2 * Math.PI * 45; // radius = 45

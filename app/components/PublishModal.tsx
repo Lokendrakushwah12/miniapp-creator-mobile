@@ -3,6 +3,7 @@ import { logger } from "../../lib/logger";
 import { useState, useEffect, useRef } from 'react';
 import { useAuthContext } from '../contexts/AuthContext';
 import { sdk } from '@farcaster/miniapp-sdk';
+import Image from 'next/image';
 
 // Confetti component for celebration
 function Confetti() {
@@ -711,8 +712,10 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                     {currentStep === 'success' && (
                         <div className="flex flex-col items-center justify-center py-8">
                             {/* Celebration Icon */}
-                            <div className="w-20 h-20 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center mb-6 animate-bounce">
-                                <span className="text-4xl">🚀</span>
+                            <div className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center mb-6">
+                                <svg className="w-10 h-10 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
                             </div>
                             
                             <h3 className="text-2xl font-bold text-black mb-2">Your App is Live!</h3>
@@ -724,9 +727,13 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                             {shareableLink && (
                                 <div className="w-full bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-xl p-5 mb-4">
                                     <div className="flex items-center gap-2 mb-3">
-                                        <svg className="w-5 h-5 text-purple-600" viewBox="0 0 24 24" fill="currentColor">
-                                            <path d="M18.24 3.66H5.76C4.24 3.66 3 4.9 3 6.42v11.16c0 1.52 1.24 2.76 2.76 2.76h12.48c1.52 0 2.76-1.24 2.76-2.76V6.42c0-1.52-1.24-2.76-2.76-2.76zm-6.24 12.9c-2.52 0-4.56-2.04-4.56-4.56s2.04-4.56 4.56-4.56 4.56 2.04 4.56 4.56-2.04 4.56-4.56 4.56z"/>
-                                        </svg>
+                                        <Image 
+                                            src="/farcaster.svg" 
+                                            alt="Farcaster" 
+                                            width={20} 
+                                            height={20}
+                                            className="w-5 h-5"
+                                        />
                                         <label className="text-sm font-semibold text-purple-900">
                                             Share Your App
                                         </label>
@@ -745,11 +752,15 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                                 logger.error('Failed to open cast composer:', err);
                                             }
                                         }}
-                                        className="w-full mb-3 flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors cursor-pointer font-medium"
+                                        className="w-full mb-3 flex items-center justify-center gap-2 px-4 py-3 bg-[#6A3CFF] text-white rounded-lg hover:bg-[#5930D9] transition-colors cursor-pointer font-medium"
                                     >
-                                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
-                                            <path d="M18.24 3.66H5.76C4.24 3.66 3 4.9 3 6.42v11.16c0 1.52 1.24 2.76 2.76 2.76h12.48c1.52 0 2.76-1.24 2.76-2.76V6.42c0-1.52-1.24-2.76-2.76-2.76zm-6.24 12.9c-2.52 0-4.56-2.04-4.56-4.56s2.04-4.56 4.56-4.56 4.56 2.04 4.56 4.56-2.04 4.56-4.56 4.56z"/>
-                                        </svg>
+                                        <Image 
+                                            src="/farcaster.svg" 
+                                            alt="Farcaster" 
+                                            width={20} 
+                                            height={20}
+                                            className="w-5 h-5 brightness-0 invert"
+                                        />
                                         Share on Farcaster
                                     </button>
                                     
@@ -816,7 +827,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                             Your app is now live and can be shared via the link above! Note that apps don&apos;t appear in the Farcaster Miniapp Store directly - your app needs to gain users and traction before it can be featured there.
                                         </p>
                                         <p className="text-sm text-blue-800 mt-2">
-                                            <strong>Tip:</strong> Share your app link on Farcaster, Twitter, and with your community to get more users!
+                                            <strong>Tip:</strong> Share your app link on Farcaster, X , and with your community to get more users!
                                         </p>
                                     </div>
                                 </div>

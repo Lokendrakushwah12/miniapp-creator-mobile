@@ -17,7 +17,7 @@ interface GeneratedProject {
     aliasSuccess?: boolean;
     isNewDeployment?: boolean;
     hasPackageChanges?: boolean;
-    appType?: 'farcaster' | 'web3'; // Which boilerplate was used
+    appType?: 'farcaster';
 }
 
 interface CodeEditorAndPreviewProps {
@@ -27,8 +27,6 @@ interface CodeEditorAndPreviewProps {
     onSaveFile?: (filePath: string, content: string) => Promise<boolean>;
     onOpenSidebar?: () => void;
     viewMode: 'code' | 'preview';
-    selectedAppType?: 'farcaster' | 'web3';
-    onSelectTemplate?: (appType: 'farcaster' | 'web3') => void;
     previewReloadTrigger?: number;
 }
 
@@ -38,8 +36,6 @@ export function CodeEditorAndPreview({
     onFileChange,
     onSaveFile,
     viewMode,
-    selectedAppType,
-    onSelectTemplate,
     previewReloadTrigger,
 }: CodeEditorAndPreviewProps) {
     const [showLogs, setShowLogs] = useState(false);
@@ -85,8 +81,6 @@ export function CodeEditorAndPreview({
                 <div className={`h-full ${viewMode === 'preview' ? 'block' : 'hidden'}`}>
                     <Preview
                         currentProject={currentProject}
-                        selectedAppType={selectedAppType}
-                        onSelectTemplate={onSelectTemplate}
                         reloadTrigger={previewReloadTrigger}
                     />
                 </div>

@@ -5,6 +5,7 @@ import { eq } from 'drizzle-orm';
 import { getUserBySessionToken, getProjectFiles, upsertProjectFile } from '../../../lib/database';
 import { config } from '../../../lib/config';
 import { notifyPublishComplete } from '../../../lib/notificationService';
+import { injectDynamicMetadata } from '../../../lib/metadataInjector';
   
 // Validate manifest structure
 function validateManifest(manifest: unknown): { valid: boolean; error?: string } {
@@ -201,6 +202,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Extract app metadata from manifest for OG tags
+    const miniappData = manifest.miniapp || manifest.frame;
+    const appName = miniappData?.name || project.name || 'Miniapp';
+    const appDescription = miniappData?.subtitle || miniappData?.splashScreenDescription || `A Farcaster miniapp`;
+    const appIconUrl = miniappData?.iconUrl;
+    
+    logger.log('📝 Extracted app metadata for OG tags:', { appName, appDescription, appIconUrl });
+
     // Trigger FULL redeploy to Vercel with the manifest file
     try {
       // Use PREVIEW_AUTH_TOKEN instead of user session token for preview host authentication
@@ -220,9 +229,25 @@ export async function POST(req: NextRequest) {
         } else {
           // Convert files to object format for direct API call
           const filesObject: { [key: string]: string } = {};
-          dbFiles.forEach((file) => {
-            filesObject[file.filename] = file.content;
-          });
+          
+          // Process files and inject OG metadata into layout.tsx
+          const projectUrl = project.vercelUrl || project.previewUrl || undefined;
+          
+          for (const file of dbFiles) {
+            let content = file.content;
+            
+            // Inject dynamic OG metadata into layout.tsx
+            if (file.filename.includes('layout.tsx') && (file.filename.includes('app/') || file.filename === 'layout.tsx')) {
+              logger.log(`📝 Injecting OG metadata into ${file.filename}`);
+              content = injectDynamicMetadata(content, appName, appDescription, projectUrl, appIconUrl);
+              
+              // Also save the updated layout.tsx to database
+              await upsertProjectFile(projectId, file.filename, content);
+              logger.log(`✅ Updated ${file.filename} with OG metadata in database`);
+            }
+            
+            filesObject[file.filename] = content;
+          }
           
           // Make direct API call to /deploy endpoint to force fresh Vercel deployment
           const previewApiBase = config.preview.apiBase;

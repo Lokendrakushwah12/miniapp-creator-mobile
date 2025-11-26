@@ -23,7 +23,7 @@ interface GeneratedProject {
     isNewDeployment?: boolean;
     hasPackageChanges?: boolean;
     lastUpdated?: number; // Timestamp to trigger iframe refresh after edits
-    appType?: 'farcaster' | 'web3'; // Which boilerplate was used
+    appType?: 'farcaster';
 }
 
 interface ChatMessage {
@@ -39,24 +39,21 @@ interface ChatInterfaceProps {
     onProjectGenerated: (project: GeneratedProject | null) => void;
     onGeneratingChange: (isGenerating: boolean) => void;
     activeAgent?: EarnKit;
-    initialAppType?: 'farcaster' | 'web3';
 }
 
 export interface ChatInterfaceRef {
     clearChat: () => void;
     focusInput: () => void;
-    setAppType: (appType: 'farcaster' | 'web3') => void;
 }
 
 export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
-    function ChatInterface({ currentProject, onProjectGenerated, onGeneratingChange, activeAgent, initialAppType = 'farcaster' }, ref) {
+    function ChatInterface({ currentProject, onProjectGenerated, onGeneratingChange, activeAgent }, ref) {
     const [prompt, setPrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
     // const [error, setError] = useState<string | null>(null);
     const [chat, setChat] = useState<ChatMessage[]>([]);
     const [aiLoading, setAiLoading] = useState(false);
     const [hasShownWarning, setHasShownWarning] = useState(false);
-    const [appType, setAppType] = useState<'farcaster' | 'web3'>(initialAppType);
     const chatBottomRef = useRef<HTMLDivElement>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
     const { sessionToken, user, isAuthenticated, walletAddress } = useAuthContext();
@@ -91,17 +88,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     
     // Flag to prevent chat state overwrites during message sending
     const isSendingMessageRef = useRef(false);
-
-    // Sync appType state with currentProject.appType when a project is loaded or initialAppType changes
-    useEffect(() => {
-        if (currentProject?.appType) {
-            logger.log(`🔄 Syncing appType from loaded project: ${currentProject.appType}`);
-            setAppType(currentProject.appType);
-        } else {
-            // Use initialAppType when no project is loaded
-            setAppType(initialAppType);
-        }
-    }, [currentProject?.appType, initialAppType]);
 
     // Chat session state - persist chatSessionId in sessionStorage to survive re-mounts
     const [chatSessionId] = useState<string>(() => {
@@ -143,9 +129,6 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
             if (textareaRef.current) {
                 textareaRef.current.focus();
             }
-        },
-        setAppType: (newAppType: 'farcaster' | 'web3') => {
-            setAppType(newAppType);
         }
     }));
     
@@ -231,7 +214,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
             if (chat.length === 0 && !aiLoading) {
                 setChat([{
                     role: 'ai',
-                    content: getWelcomeMessage(appType),
+                    content: getWelcomeMessage(),
                     phase: 'requirements',
                     timestamp: Date.now()
                 }]);
@@ -240,42 +223,17 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
 
         loadChatMessages();
         // REMOVED currentPhase from dependencies to prevent reset loop during generation
-    }, [currentProject, sessionToken, chat.length, aiLoading, currentPhase, appType, chatProjectId]);
+    }, [currentProject, sessionToken, chat.length, aiLoading, currentPhase, chatProjectId]);
 
-    // Helper function to get welcome message based on app type
-    const getWelcomeMessage = (type: 'farcaster' | 'web3') => {
-        if (type === 'web3') {
-            return 'Minidev is your on-chain sidekick that transforms ideas into fully functional Web3 Web Apps — no coding required.';
-        }
+    // Helper function to get welcome message
+    const getWelcomeMessage = () => {
         return 'Minidev is your on-chain sidekick that transforms ideas into fully functional Farcaster Mini Apps — no coding required.';
     };
 
-    // Helper function to get Minidev pfp based on app type
-    const getMinidevPfp = (type: 'farcaster' | 'web3') => {
-        if (type === 'web3') {
-            return '/minidevpfpweb.png';
-        }
+    // Helper function to get Minidev pfp
+    const getMinidevPfp = () => {
         return '/minidevpfpfarcaster.jpeg';
     };
-
-    // Update welcome message when app type changes
-    useEffect(() => {
-        // Only update if we have exactly one message (the welcome message) and no project
-        // Don't use chat in the condition check to avoid race conditions
-        setChat(prev => {
-            // Only update if it's just the welcome message
-            if (prev.length === 1 && !currentProject && prev[0].role === 'ai' && prev[0].phase === 'requirements') {
-                logger.log(`🔄 App type changed to ${appType}, updating welcome message`);
-                return [{
-                    role: 'ai',
-                    content: getWelcomeMessage(appType),
-                    phase: 'requirements',
-                    timestamp: Date.now()
-                }];
-            }
-            return prev;
-        });
-    }, [appType, currentProject]);
 
     // Show warning message once when user hasn't started chatting
     useEffect(() => {
@@ -386,7 +344,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 action?: string;
                 projectId?: string;
                 walletAddress?: string;
-                appType?: 'farcaster' | 'web3';
+                appType?: 'farcaster';
             } = {
                 sessionId: chatSessionId,
                 message: userMessage,
@@ -395,7 +353,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 // This ensures conversation continuity across messages
                 projectId: currentProject?.projectId || chatProjectId || undefined,
                 walletAddress: walletAddress || undefined, // Send wallet address for server-side validation
-                appType: appType // Send app type for context-aware prompts
+                appType: 'farcaster' // Always Farcaster miniapp
             };
 
             // Determine the appropriate action based on current phase
@@ -443,7 +401,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                         setChat(prev => {
                             const newChat = [...prev];
                             if (newChat.length > 0 && newChat[newChat.length - 1].role === 'ai') {
-                                newChat[newChat.length - 1].content = `Processing your changes... This may take 2-5 minutes. Job ID: ${jobData.jobId.substring(0, 8)}...`;
+                                newChat[newChat.length - 1].content = `Processing your changes... This may take 2-5 minutes.`;
                             }
                             return newChat;
                         });
@@ -712,7 +670,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                         .map(msg => msg.content)
                         .join('\n\n');
                     
-                    const finalPrompt = `BUILD THIS ${appType === 'farcaster' ? 'FARCASTER MINIAPP' : 'WEB3 APP'}:
+                    const finalPrompt = `BUILD THIS FARCASTER MINIAPP:
 
 User Requirements (from conversation):
 ${conversationContext}
@@ -836,7 +794,7 @@ Please build this project with all the features and requirements discussed above
                             generatedFiles: job.result.generatedFiles,
                             previewUrl: job.result.previewUrl,
                             vercelUrl: job.result.vercelUrl,
-                            appType: job.result.appType || appType, // Include appType from job result
+                            appType: 'farcaster',
                             isNewDeployment: true, // Mark as new deployment for delay logic
                         };
 
@@ -927,7 +885,7 @@ Please build this project with all the features and requirements discussed above
                         phase: msg.phase,
                         timestamp: msg.timestamp
                     })),
-                    appType: appType  // Pass selected app type to use correct boilerplate
+                    appType: 'farcaster'  // Always Farcaster miniapp
                 }),
             });
 
@@ -1213,7 +1171,7 @@ Please build this project with all the features and requirements discussed above
                             {/* Profile Picture for AI (left side) */}
                             {msg.role === 'ai' && (
                                 <Image 
-                                    src={getMinidevPfp(appType)}
+                                    src={getMinidevPfp()}
                                     alt="MiniDev"
                                     width={32}
                                     height={32}
@@ -1245,21 +1203,16 @@ Please build this project with all the features and requirements discussed above
                                 {/* Retry button for error messages */}
                                 {msg.role === 'ai' && msg.content.includes('❌') && msg.content.includes('Error') && (
                                     <button
-                                        onClick={() => {
+                                        onClick={async () => {
                                             // Extract the error message from the content
                                             const errorMatch = msg.content.match(/```\n([\s\S]+?)\n```/);
                                             const errorMessage = errorMatch ? errorMatch[1] : msg.content;
                                             
-                                            // Set the prompt with error context
-                                            setPrompt(`The deployment failed with this error:\n\n${errorMessage}\n\nPlease fix this error.`);
+                                            // Create the retry prompt
+                                            const retryPrompt = `The deployment failed with this error:\n\n${errorMessage}\n\nPlease fix this error.`;
                                             
-                                            // Focus the input
-                                            setTimeout(() => {
-                                                const input = document.querySelector('textarea[placeholder*="message"]') as HTMLTextAreaElement;
-                                                if (input) {
-                                                    input.focus();
-                                                }
-                                            }, 100);
+                                            // Directly send the message
+                                            await handleSendMessage(retryPrompt);
                                         }}
                                         className="mt-3 px-4 py-2 bg-black hover:bg-gray-800 text-white text-xs font-medium rounded-full transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                                         disabled={aiLoading}
@@ -1320,10 +1273,11 @@ Please build this project with all the features and requirements discussed above
                             )}
                         </div>
                     ))}
-                    {aiLoading && (
+                    {/* Only show "Thinking" indicator in requirements/building phases, not in edit mode */}
+                    {aiLoading && currentPhase !== 'editing' && (
                         <div className="flex gap-1 items-start justify-start">
                             <Image 
-                                src={getMinidevPfp(appType)}
+                                src={getMinidevPfp()}
                                 alt="MiniDev"
                                 width={32}
                                 height={32}
@@ -1331,8 +1285,7 @@ Please build this project with all the features and requirements discussed above
                             />
                             <div className="rounded-lg px-1 py-2 max-w-[80%]">
                                 <div className="flex items-center gap-1">
-                                   
-                                    <TextShimmer>
+                                    <TextShimmer className="text-sm">
                                         Thinking...
                                     </TextShimmer>
                                 </div>

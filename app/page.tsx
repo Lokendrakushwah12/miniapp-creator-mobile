@@ -24,14 +24,13 @@ interface GeneratedProject {
   aliasSuccess?: boolean;
   isNewDeployment?: boolean;
   hasPackageChanges?: boolean;
-  appType?: 'farcaster' | 'web3'; // Which boilerplate was used
+  appType?: 'farcaster';
 }
 
 function HomeContent() {
   const [currentProject, setCurrentProject] = useState<GeneratedProject | null>(null);
   const [projectForPreview, setProjectForPreview] = useState<GeneratedProject | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [selectedAppType, setSelectedAppType] = useState<'farcaster' | 'web3'>('farcaster');
   const { sessionToken } = useAuthContext();
   const { apiCall } = useApiUtils();
   const chatInterfaceRef = useRef<ChatInterfaceRef>(null);
@@ -130,13 +129,13 @@ function HomeContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentProject]);
 
-  const handleProjectSelect = async (project: { id: string; name: string; description?: string; appType?: 'farcaster' | 'web3'; previewUrl?: string; vercelUrl?: string; createdAt: string; updatedAt: string }) => {
+  const handleProjectSelect = async (project: { id: string; name: string; description?: string; appType?: 'farcaster'; previewUrl?: string; vercelUrl?: string; createdAt: string; updatedAt: string }) => {
     try {
       console.log('🔍 handleProjectSelect called with project:', project);
       console.log('🔍 Attempting to fetch project with ID:', project.id);
       
       // Load project files and create a GeneratedProject object using apiCall
-      const data = await apiCall<{ project: { id: string; name: string; description?: string; appType?: 'farcaster' | 'web3'; previewUrl?: string; vercelUrl?: string; files: unknown[]; chatMessages: unknown[] } }>(`/api/projects/${project.id}`, {
+      const data = await apiCall<{ project: { id: string; name: string; description?: string; appType?: 'farcaster'; previewUrl?: string; vercelUrl?: string; files: unknown[]; chatMessages: unknown[] } }>(`/api/projects/${project.id}`, {
         headers: {
           'Authorization': `Bearer ${sessionToken}`,
           'Content-Type': 'application/json',
@@ -179,7 +178,6 @@ function HomeContent() {
     console.log('🆕 handleNewProject called - clearing current project');
     setCurrentProject(null);
     setProjectForPreview(null);
-    setSelectedAppType('farcaster'); // Reset to default
     
     // Clear any preview delay timer
     if (previewDelayTimerRef.current) {
@@ -195,16 +193,6 @@ function HomeContent() {
       setTimeout(() => {
         chatInterfaceRef.current?.focusInput();
       }, 100);
-    }
-  };
-
-  const handleTemplateSelect = (appType: 'farcaster' | 'web3') => {
-    console.log('🎯 Template selected:', appType);
-    setSelectedAppType(appType);
-    
-    // Update ChatInterface's appType
-    if (chatInterfaceRef.current) {
-      chatInterfaceRef.current.setAppType(appType);
     }
   };
 
@@ -246,7 +234,6 @@ function HomeContent() {
             onProjectGenerated={setCurrentProject}
             onGeneratingChange={setIsGenerating}
             activeAgent={activeAgent || undefined}
-            initialAppType={selectedAppType}
           />
 
           {/* Mobile Toggle Button */}
@@ -294,8 +281,6 @@ function HomeContent() {
               currentProject={projectForPreview}
               isGenerating={isGenerating || (!!currentProject && !projectForPreview)}
               onOpenSidebar={() => hoverSidebarRef.current?.openSidebar()}
-              selectedAppType={selectedAppType}
-              onSelectTemplate={handleTemplateSelect}
             />
           </div>
           

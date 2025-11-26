@@ -7,7 +7,7 @@ interface Project {
   id: string;
   name: string;
   description?: string;
-  appType?: 'farcaster' | 'web3';
+  appType?: 'farcaster';
   previewUrl?: string;
   vercelUrl?: string;
   createdAt: string;

@@ -22,7 +22,7 @@ interface GeneratedProject {
     aliasSuccess?: boolean;
     isNewDeployment?: boolean;
     hasPackageChanges?: boolean;
-    appType?: 'farcaster' | 'web3'; // Which boilerplate was used
+    appType?: 'farcaster';
 }
 
 interface CodeEditorProps {

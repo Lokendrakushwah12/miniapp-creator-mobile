@@ -7,6 +7,7 @@ export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const appName = searchParams.get('name') || 'app name';
+    const iconUrl = searchParams.get('icon');
 
     return new ImageResponse(
       (
@@ -37,6 +38,37 @@ export async function GET(request: NextRequest) {
               backgroundSize: '40px 40px',
             }}
           />
+
+          {/* App Icon - Bottom left if provided */}
+          {iconUrl && (
+            <div
+              style={{
+                display: 'flex',
+                position: 'absolute',
+                bottom: '80px',
+                left: '80px',
+                width: '120px',
+                height: '120px',
+                borderRadius: '24px',
+                overflow: 'hidden',
+                boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+                zIndex: 2,
+              }}
+            >
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={iconUrl}
+                alt={appName}
+                width={120}
+                height={120}
+                style={{
+                  width: '100%',
+                  height: '100%',
+                  objectFit: 'cover',
+                }}
+              />
+            </div>
+          )}
 
           {/* App Name - Large text on left, stacked vertically */}
           <div

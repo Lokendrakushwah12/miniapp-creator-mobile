@@ -8,7 +8,8 @@ export function injectDynamicMetadata(
   layoutContent: string,
   appName: string,
   appDescription?: string,
-  baseUrl?: string
+  baseUrl?: string,
+  iconUrl?: string
 ): string {
   try {
     // Default description if not provided
@@ -16,7 +17,12 @@ export function injectDynamicMetadata(
     
     // Use baseUrl if provided, otherwise construct from app name
     const appUrl = baseUrl || `https://${appName.toLowerCase().replace(/\s+/g, '-')}.minidev.fun`;
-    const ogImageUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://minidev.fun'}/api/og-image?name=${encodeURIComponent(appName)}`;
+    // Generate OG image URL with app name and optional icon
+    const ogImageParams = new URLSearchParams({ name: appName });
+    if (iconUrl) {
+      ogImageParams.set('icon', iconUrl);
+    }
+    const ogImageUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://minidev.fun'}/api/og-image?${ogImageParams.toString()}`;
 
     // Pattern to match metadata export (using [\s\S] instead of . with s flag for compatibility)
     const metadataPattern = /export\s+const\s+metadata\s*:\s*Metadata\s*=\s*\{([\s\S]+?)\}/;
@@ -144,14 +150,15 @@ export function processFilesWithMetadata(
   files: { filename: string; content: string }[],
   appName: string,
   appDescription?: string,
-  baseUrl?: string
+  baseUrl?: string,
+  iconUrl?: string
 ): { filename: string; content: string }[] {
   return files.map(file => {
     // Only process layout.tsx files
     if (file.filename.includes('layout.tsx') || file.filename.includes('app/layout.tsx') || file.filename.includes('src/app/layout.tsx')) {
       return {
         filename: file.filename,
-        content: injectDynamicMetadata(file.content, appName, appDescription, baseUrl)
+        content: injectDynamicMetadata(file.content, appName, appDescription, baseUrl, iconUrl)
       };
     }
     return file;

@@ -2,10 +2,10 @@
   "frame": {
     "name": "my app",
     "version": "1",
-    "iconUrl": "https://miniapp.minidev.fun/icon.png",
+    "iconUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
     "homeUrl": "https://miniapp.minidev.fun/",
-    "imageUrl": "https://miniapp.minidev.fun/image.png",
-    "splashImageUrl": "https://miniapp.minidev.fun/splash.png",
+    "imageUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
+    "splashImageUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
     "splashBackgroundColor": "#ffffff",
     "webhookUrl": "https://miniapp.minidev.fun/api/webhook",
     "subtitle": "my subtitle",

@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { Icons } from "./sections/icons";
 import { TemplateSelector } from "./TemplateSelector";
 import { Iphone } from "./ui/iphone";
-import { Safari } from "./ui/safari";
 
 interface GeneratedProject {
   projectId: string;
@@ -19,20 +18,16 @@ interface GeneratedProject {
   isNewDeployment?: boolean;
   hasPackageChanges?: boolean;
   lastUpdated?: number; // Timestamp to track when project was last updated
-  appType?: "farcaster" | "web3"; // Which boilerplate was used
+  appType?: "farcaster";
 }
 
 interface PreviewProps {
   currentProject: GeneratedProject | null;
-  selectedAppType?: "farcaster" | "web3";
-  onSelectTemplate?: (appType: "farcaster" | "web3") => void;
   reloadTrigger?: number;
 }
 
 export function Preview({
   currentProject,
-  selectedAppType = "farcaster",
-  onSelectTemplate,
   reloadTrigger,
 }: PreviewProps) {
   const [iframeError, setIframeError] = useState(false);
@@ -175,10 +170,7 @@ export function Preview({
     return (
       <div className="h-full flex flex-col bg-white overflow-y-auto">
         <div className="flex-1 flex items-center justify-center p-4">
-          <TemplateSelector
-            selectedAppType={selectedAppType}
-            onSelectTemplate={onSelectTemplate || (() => {})}
-          />
+          <TemplateSelector />
         </div>
       </div>
     );
@@ -235,10 +227,6 @@ export function Preview({
     setIframeError(false);
   };
 
-  // Determine app type - use currentProject.appType if available, otherwise fall back to selectedAppType
-  const appType = currentProject.appType || selectedAppType || "farcaster";
-  const isFarcaster = appType === "farcaster";
-
   return (
     <div className="h-full flex flex-col bg-white overflow-y-auto">
       {/* Preview */}
@@ -248,7 +236,7 @@ export function Preview({
           <div
             className="relative"
             style={{
-              width: isFarcaster ? "340px" : "800px",
+              width: "340px",
               maxWidth: "90vw",
             }}
           >
@@ -327,106 +315,65 @@ export function Preview({
               )}
             </div>
 
-            {/* Device Mockup with Iframe */}
-            {deploymentStatus === "ready" &&
-              (isFarcaster ? (
-                // iPhone mockup for Farcaster apps
-                <div className="relative">
-                  {/* Iframe positioned to show through iPhone's screen area */}
-                  <div
-                    className="absolute z-0 px-4 overflow-hidden"
-                    style={{
-                      left: "4.9%",
-                      top: "2.2%",
-                      width: "90%",
-                      height: "95.6%",
-                      borderRadius: "6.5% / 6.5%",
-                    }}
-                  >
-                    <div className="flex items-center justify-between px-4 py-2 text-[11px] font-semibold text-black/90 z-10 pointer-events-none">
-                      <span>{formattedStatusBarTime}</span>
-                        <div className="flex items-center justify-center gap-1">
-                          <SignalHighIcon strokeWidth={2.75} size={12} className="text-black/80 mb-[2px]" />
-                          <WifiHighIcon strokeWidth={2.75} size={12} className="text-black/80 mb-[2px]" />
-                        {/* battery */}
-                        <div className="flex items-center gap-[0.67px]">
-                          <div className="w-4 h-2 border-[0.67px] border-black/80 rounded-[2px] relative">
-                            <div className="absolute inset-[0.5px] rounded-[1.5px] bg-black/80" />
-                          </div>
-                          <div className="w-0.5 h-1 border border-black/80 rounded-r-sm" />
+            {/* Device Mockup with Iframe - iPhone for Farcaster apps */}
+            {deploymentStatus === "ready" && (
+              <div className="relative">
+                {/* Iframe positioned to show through iPhone's screen area */}
+                <div
+                  className="absolute z-0 px-4 overflow-hidden"
+                  style={{
+                    left: "4.9%",
+                    top: "2.2%",
+                    width: "90%",
+                    height: "95.6%",
+                    borderRadius: "6.5% / 6.5%",
+                  }}
+                >
+                  <div className="flex items-center justify-between px-4 py-2 text-[11px] font-semibold text-black/90 z-10 pointer-events-none">
+                    <span>{formattedStatusBarTime}</span>
+                      <div className="flex items-center justify-center gap-1">
+                        <SignalHighIcon strokeWidth={2.75} size={12} className="text-black/80 mb-[2px]" />
+                        <WifiHighIcon strokeWidth={2.75} size={12} className="text-black/80 mb-[2px]" />
+                      {/* battery */}
+                      <div className="flex items-center gap-[0.67px]">
+                        <div className="w-4 h-2 border-[0.67px] border-black/80 rounded-[2px] relative">
+                          <div className="absolute inset-[0.5px] rounded-[1.5px] bg-black/80" />
                         </div>
+                        <div className="w-0.5 h-1 border border-black/80 rounded-r-sm" />
                       </div>
                     </div>
+                  </div>
 
-                    <iframe
-                      key={`${currentProject.projectId}-${iframeKey}`}
-                      src={previewUrl}
-                      className="w-full h-full border-0 pb-6 bg-white"
-                      title="Generated App Preview"
-                      allow="fullscreen; camera; microphone; gyroscope; accelerometer; geolocation; clipboard-write; autoplay"
-                      data-origin={previewUrl}
-                      data-v0="true"
-                      loading="eager"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups-to-escape-sandbox allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-presentation"
-                      onError={handleIframeError}
-                      onLoad={handleIframeLoad}
-                      style={{
-                        scrollbarWidth: "none",
-                        msOverflowStyle: "none",
-                      }}
-                    />
-                  </div>
-                  {/* iPhone frame overlays with transparent screen area (mask applied internally) */}
-                  <Iphone
-                    src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-                    className="w-full max-h-[600px] relative pointer-events-none"
-                  />
-                </div>
-              ) : (
-                // Safari mockup for Web3 apps
-                <div className="relative">
-                  {/* Iframe positioned to show through Safari's screen area */}
-                  <div
-                    className="absolute z-0 overflow-hidden"
+                  <iframe
+                    key={`${currentProject.projectId}-${iframeKey}`}
+                    src={previewUrl}
+                    className="w-full h-full border-0 pb-6 bg-white"
+                    title="Generated App Preview"
+                    allow="fullscreen; camera; microphone; gyroscope; accelerometer; geolocation; clipboard-write; autoplay"
+                    data-origin={previewUrl}
+                    data-v0="true"
+                    loading="eager"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups-to-escape-sandbox allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-presentation"
+                    onError={handleIframeError}
+                    onLoad={handleIframeLoad}
                     style={{
-                      left: "0.08%",
-                      top: "6.9%",
-                      width: "99.75%",
-                      height: "93%",
-                      borderRadius: "0 0 11px 11px",
+                      scrollbarWidth: "none",
+                      msOverflowStyle: "none",
                     }}
-                  >
-                    <iframe
-                      key={`${currentProject.projectId}-${iframeKey}`}
-                      src={previewUrl}
-                      className="w-full h-full border-0 bg-white"
-                      title="Generated App Preview"
-                      allow="fullscreen; camera; microphone; gyroscope; accelerometer; geolocation; clipboard-write; autoplay"
-                      data-origin={previewUrl}
-                      data-v0="true"
-                      loading="eager"
-                      sandbox="allow-scripts allow-same-origin allow-forms allow-downloads allow-popups-to-escape-sandbox allow-pointer-lock allow-popups allow-modals allow-orientation-lock allow-presentation"
-                      onError={handleIframeError}
-                      onLoad={handleIframeLoad}
-                      style={{
-                        scrollbarWidth: "none",
-                        msOverflowStyle: "none",
-                      }}
-                    />
-                  </div>
-                  {/* Safari frame overlays with transparent screen area (mask applied internally) */}
-                  <Safari
-                    url={previewUrl}
-                    imageSrc="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-                    className="w-full relative pointer-events-none"
                   />
                 </div>
-              ))}
+                {/* iPhone frame overlays with transparent screen area (mask applied internally) */}
+                <Iphone
+                  src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+                  className="w-full max-h-[600px] relative pointer-events-none"
+                />
+              </div>
+            )}
           </div>
 
           {/* Label */}
           <div className="mt-4 text-xs text-black-60">
-            {isFarcaster ? "Farcaster Mini App Preview" : "Web3 App Preview"}
+            Farcaster Mini App Preview
           </div>
           {previewUrl && (
             <div className="mt-1 text-xs text-gray-500 text-center max-w-md truncate">

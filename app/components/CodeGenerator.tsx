@@ -24,18 +24,16 @@ interface GeneratedProject {
   aliasSuccess?: boolean;
   isNewDeployment?: boolean;
   hasPackageChanges?: boolean;
-  appType?: 'farcaster' | 'web3'; // Which boilerplate was used
+  appType?: 'farcaster';
 }
 
 interface CodeGeneratorProps {
   currentProject: GeneratedProject | null;
   isGenerating?: boolean;
   onOpenSidebar?: () => void;
-  selectedAppType?: 'farcaster' | 'web3';
-  onSelectTemplate?: (appType: 'farcaster' | 'web3') => void;
 }
 
-export function CodeGenerator({ currentProject, isGenerating = false, onOpenSidebar, selectedAppType, onSelectTemplate }: CodeGeneratorProps) {
+export function CodeGenerator({ currentProject, isGenerating = false, onOpenSidebar }: CodeGeneratorProps) {
   const { sessionToken } = useAuthContext();
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('preview');
   const [showPublishModal, setShowPublishModal] = useState(false);
@@ -164,8 +162,8 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
             </div>
           )}
           
-          {/* Publish Button - Only show for Farcaster apps */}
-          {currentProject && currentProject.appType === 'farcaster' && (
+          {/* Publish Button */}
+          {currentProject && (
             <button
               onClick={() => setShowPublishModal(true)}
               className="px-4 py-2 bg-black text-white hover:bg-gray-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
@@ -181,8 +179,6 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
         isGenerating={isGenerating}
         onOpenSidebar={onOpenSidebar}
         viewMode={viewMode}
-        selectedAppType={selectedAppType}
-        onSelectTemplate={onSelectTemplate}
         previewReloadTrigger={previewReloadTrigger}
         onFileChange={(filePath, content) => {
           logger.log('File changed:', filePath, content.substring(0, 100));
