@@ -588,6 +588,7 @@ export async function redeployToVercel(
       files: filesObject,
       deployToExternal: "vercel",
       appType: appType || 'farcaster',
+      skipBoilerplate: true, // CRITICAL: Don't override user's files with boilerplate for redeployments
       isWeb3: isWeb3 !== undefined ? isWeb3 : undefined,
       skipContracts: true, // Skip contracts for follow-up deployments
       jobId,

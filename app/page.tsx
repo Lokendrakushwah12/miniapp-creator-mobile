@@ -211,6 +211,14 @@ function HomeContent() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [mobileViewMode, setMobileViewMode] = useState<'chat' | 'preview'>('chat');
 
+  // Auto-switch to preview when generation starts
+  useEffect(() => {
+    if (isGenerating) {
+      console.log('🚀 Generation started - switching to preview mode');
+      setMobileViewMode('preview');
+    }
+  }, [isGenerating]);
+
   return (
     <div className="flex min-h-screen h-screen font-funnel-sans relative bg-white overflow-hidden">
       {/* Thin Permanent Sidebar */}
@@ -286,8 +294,6 @@ function HomeContent() {
               currentProject={projectForPreview}
               isGenerating={isGenerating || (!!currentProject && !projectForPreview)}
               onOpenSidebar={() => hoverSidebarRef.current?.openSidebar()}
-              activeAgent={activeAgent || undefined}
-              feeModelType={feeModelType}
               selectedAppType={selectedAppType}
               onSelectTemplate={handleTemplateSelect}
             />

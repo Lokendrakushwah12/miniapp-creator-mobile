@@ -4,10 +4,7 @@ import { logger } from "../../lib/logger";
 import { useState } from 'react';
 import { CodeEditorAndPreview } from './CodeEditorAndPreview';
 import { PublishModal } from './PublishModal';
-import TopUpDialog from './top-up-dialog';
 import { useAuthContext } from '../contexts/AuthContext';
-import { useQuery } from '@tanstack/react-query';
-import type { EarnKit } from '@earnkit/earn';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,41 +31,16 @@ interface CodeGeneratorProps {
   currentProject: GeneratedProject | null;
   isGenerating?: boolean;
   onOpenSidebar?: () => void;
-  activeAgent?: EarnKit;
-  feeModelType?: "free-tier" | "credit-based";
   selectedAppType?: 'farcaster' | 'web3';
   onSelectTemplate?: (appType: 'farcaster' | 'web3') => void;
 }
 
-export function CodeGenerator({ currentProject, isGenerating = false, onOpenSidebar, activeAgent, feeModelType, selectedAppType, onSelectTemplate }: CodeGeneratorProps) {
-  const { sessionToken, isAuthenticated, walletAddress } = useAuthContext();
+export function CodeGenerator({ currentProject, isGenerating = false, onOpenSidebar, selectedAppType, onSelectTemplate }: CodeGeneratorProps) {
+  const { sessionToken } = useAuthContext();
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('preview');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [previewReloadTrigger, setPreviewReloadTrigger] = useState(0);
-
-  // Get balance data
-  const { data: balance } = useQuery({
-    queryKey: ["balance", "credit-based", walletAddress],
-    queryFn: async () => {
-      if (!walletAddress || !activeAgent) throw new Error("Wallet not connected");
-      return activeAgent.getBalance({ walletAddress });
-    },
-    enabled: !!walletAddress && !!activeAgent && isAuthenticated,
-    placeholderData: { eth: "0", credits: "0" },
-    staleTime: 1000 * 30,
-  });
-
-  const handleTopUpSuccess = () => {
-    // Handle successful top up - balance will refresh automatically
-    console.log('Top up successful!');
-  };
-
-  logger.log('🎨 CodeGenerator render:', {
-    hasActiveAgent: !!activeAgent,
-    feeModelType,
-    shouldShowBalance: !!(activeAgent && feeModelType)
-  });
 
   const getViewModeIcon = (mode: 'code' | 'preview') => {
     switch (mode) {
@@ -160,7 +132,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
           </div> */}
         </div>
 
-        {/* Right side - Link Actions, Publish Button & Balance Display */}
+        {/* Right side - Link Actions & Publish Button */}
         <div className="flex items-center gap-3">
           {/* Link Display with Actions - Show when project exists */}
           {currentProject?.url && (
@@ -189,37 +161,6 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
                   <ExternalLinkIcon className="w-4 h-4" />
                 </button>
               </div>
-            </div>
-          )}
-          
-          {/* Balance & Top Up - Show when credit system is available */}
-          {activeAgent && feeModelType && (
-            <div className="flex items-center gap-3">
-              {walletAddress ? (
-                <>
-                  {/* Balance Display */}
-                  <div className="text-sm text-gray-600">
-                    <span>Balance: {balance ? `${balance.credits} Credits` : '0 Credits'}</span>
-                  </div>
-                  
-                  {/* Top Up Button */}
-                  <TopUpDialog
-                    activeAgent={activeAgent}
-                    feeModelType={feeModelType}
-                    onSuccess={handleTopUpSuccess}
-                  >
-                    <button
-                      className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg text-sm font-medium hover:bg-gray-50 transition-colors flex items-center gap-2"
-                      title="Top Up Credits"
-                    >
-                      <span>Top Up</span>
-                    </button>
-                  </TopUpDialog>
-                </>
-              ) : (
-                /* Message when no wallet is connected */
-                <span className="text-sm text-gray-500">Connect wallet in Warpcast</span>
-              )}
             </div>
           )}
           
