@@ -13,11 +13,7 @@ interface BalanceDisplayProps {
 }
 
 export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDisplayProps) {
-    const { isAuthenticated, context } = useAuthContext();
-    
-    // Get wallet address from Farcaster context verifications (custody address)
-    // Note: In Farcaster miniapps, wallet operations go through sdk.wallet actions
-    const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
+    const { isAuthenticated, walletAddress } = useAuthContext();
 
     logger.log('💰 BalanceDisplay render:', {
         isAuthenticated,

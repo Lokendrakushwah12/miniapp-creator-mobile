@@ -52,8 +52,7 @@ export default function TopUpDialog({
     const [open, setOpen] = useState<boolean>(false);
     const [processingOption, setProcessingOption] = useState<string | null>(null);
 
-    const { isAuthenticated, context } = useAuthContext();
-    const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
+    const { isAuthenticated, walletAddress } = useAuthContext();
     const queryClient = useQueryClient();
 
     // Data Fetching - fetch top-up details when dialog opens

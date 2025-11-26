@@ -58,30 +58,32 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     const [appType, setAppType] = useState<'farcaster' | 'web3'>(initialAppType);
     const chatBottomRef = useRef<HTMLDivElement>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const { sessionToken, user, isAuthenticated, context } = useAuthContext();
+    const { sessionToken, user, isAuthenticated, walletAddress } = useAuthContext();
     const queryClient = useQueryClient();
-    const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
 
-    // Check user's credit balance
+    // Check if credits are disabled via environment variable
+    const credsOff = process.env.NEXT_PUBLIC_CREDS_OFF === 'true';
+
+    // Check user's credit balance (only if credits are enabled and we have a wallet)
     const { data: balance } = useQuery({
         queryKey: ["balance", "credit-based", walletAddress],
         queryFn: async () => {
             if (!walletAddress || !activeAgent) throw new Error("Wallet not connected");
             return activeAgent.getBalance({ walletAddress });
         },
-        enabled: !!walletAddress && !!activeAgent && isAuthenticated,
+        enabled: !credsOff && !!walletAddress && !!activeAgent && isAuthenticated,
         placeholderData: { eth: "0", credits: "0" },
         staleTime: 1000 * 30,
     });
-
-    // Check if credits are disabled via environment variable
-    const credsOff = process.env.NEXT_PUBLIC_CREDS_OFF === 'true';
     
     // Check if user has enough credits (need 10 credit per message)
-    const hasEnoughCredits = balance ? parseInt(balance.credits) >= 10 : false; // Default to false if no balance data
+    const hasEnoughCredits = balance ? parseInt(balance.credits) >= 10 : false;
     
-    // Block chat if credits are enabled AND (no wallet OR insufficient credits)
-    const shouldBlockChat = !credsOff && activeAgent && (!walletAddress || !hasEnoughCredits);
+    // Block chat if:
+    // 1. Credits are enabled (!credsOff)
+    // 2. AND there's an activeAgent (credit system is configured)
+    // 3. AND (no wallet OR insufficient credits)
+    const shouldBlockChat = !credsOff && !!activeAgent && (!walletAddress || !hasEnoughCredits);
 
     // Timeout ref for cleanup to prevent duplicate calls
     const generationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -322,7 +324,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         // Check wallet and credits BEFORE starting any UI updates
         if (shouldBlockChat) {
             if (!walletAddress) {
-                toast.error('Please connect a wallet to start chatting.');
+                toast.error('Wallet not found. Please verify your Farcaster account has a connected wallet.');
             } else {
                 toast.error('Insufficient credits. Please top up your balance to continue chatting.');
             }
@@ -391,7 +393,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 // Use chatProjectId (from draft project) if no current project exists
                 // This ensures conversation continuity across messages
                 projectId: currentProject?.projectId || chatProjectId || undefined,
-                walletAddress: walletAddress, // Send wallet address for server-side validation
+                walletAddress: walletAddress || undefined, // Send wallet address for server-side validation
                 appType: appType // Send app type for context-aware prompts
             };
 
@@ -1355,8 +1357,8 @@ Please build this project with all the features and requirements discussed above
                                 <div className="text-red-700">
                                     <p className="font-normal text-xs">
                                         {!walletAddress 
-                                            ? 'Please connect a wallet to start chatting.' 
-                                            : 'Insufficient credits. Please top up to continue chatting (10 credit per message).'}
+                                            ? 'Credits require a connected wallet. Verify your Farcaster account has a wallet linked.' 
+                                            : 'Insufficient credits. Please top up to continue chatting (10 credits per message).'}
                                     </p>
                                 </div>
                             </div>

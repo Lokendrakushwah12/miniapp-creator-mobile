@@ -24,6 +24,7 @@ interface AuthState {
   isLoading: boolean;
   isInMiniApp: boolean;
   context: Context.MiniAppContext | null;
+  walletAddress: string | null;
 }
 
 export function useFarcasterAuth() {
@@ -34,6 +35,7 @@ export function useFarcasterAuth() {
     isLoading: true,
     isInMiniApp: false,
     context: null,
+    walletAddress: null,
   });
   
   const hasInitialized = useRef(false);
@@ -49,6 +51,7 @@ export function useFarcasterAuth() {
       isLoading: false,
       isInMiniApp: authState.isInMiniApp,
       context: authState.context,
+      walletAddress: null,
     });
     hasInitialized.current = false;
     initializationPromise.current = null;
@@ -87,6 +90,29 @@ export function useFarcasterAuth() {
     }
   }, []);
 
+  // Get wallet address from Farcaster SDK
+  const getWalletAddress = useCallback(async (): Promise<string | null> => {
+    try {
+      console.log('💰 [useFarcasterAuth] Getting wallet address from Farcaster SDK...');
+      
+      // Try to get connected accounts from the ethProvider
+      const accounts = await sdk.wallet.ethProvider.request({
+        method: 'eth_accounts',
+      });
+      
+      console.log('💰 [useFarcasterAuth] eth_accounts result:', accounts);
+      
+      if (accounts && accounts.length > 0) {
+        return accounts[0];
+      }
+      
+      return null;
+    } catch (error) {
+      console.log('💰 [useFarcasterAuth] Could not get wallet address:', error);
+      return null;
+    }
+  }, []);
+
   useEffect(() => {
     const initializeAuth = async () => {
       // Prevent multiple initializations
@@ -112,6 +138,7 @@ export function useFarcasterAuth() {
               isLoading: false,
               isInMiniApp: false,
               context: null,
+              walletAddress: null,
             });
             return;
           }
@@ -129,6 +156,7 @@ export function useFarcasterAuth() {
               isLoading: false,
               isInMiniApp: true,
               context,
+              walletAddress: null,
             });
             return;
           }
@@ -142,6 +170,10 @@ export function useFarcasterAuth() {
 
           console.log('👤 [useFarcasterAuth] Farcaster user:', farcasterUser);
 
+          // Get wallet address from Farcaster SDK
+          const walletAddress = await getWalletAddress();
+          console.log('💰 [useFarcasterAuth] Wallet address:', walletAddress);
+
           // Authenticate with backend
           const authResult = await authenticateWithBackend(farcasterUser);
 
@@ -153,6 +185,7 @@ export function useFarcasterAuth() {
               isLoading: false,
               isInMiniApp: true,
               context,
+              walletAddress,
             });
             hasInitialized.current = true;
             console.log('✅ [useFarcasterAuth] Authentication complete');
@@ -164,6 +197,7 @@ export function useFarcasterAuth() {
               isLoading: false,
               isInMiniApp: true,
               context,
+              walletAddress,
             });
           }
         } catch (error) {
@@ -175,6 +209,7 @@ export function useFarcasterAuth() {
             isLoading: false,
             isInMiniApp: false,
             context: null,
+            walletAddress: null,
           });
         } finally {
           initializationPromise.current = null;
@@ -185,11 +220,10 @@ export function useFarcasterAuth() {
     };
 
     initializeAuth();
-  }, [authenticateWithBackend]);
+  }, [authenticateWithBackend, getWalletAddress]);
 
   return {
     ...authState,
     handleSessionExpired,
   };
 }
-

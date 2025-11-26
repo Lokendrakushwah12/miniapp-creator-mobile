@@ -41,14 +41,11 @@ interface CodeGeneratorProps {
 }
 
 export function CodeGenerator({ currentProject, isGenerating = false, onOpenSidebar, activeAgent, feeModelType, selectedAppType, onSelectTemplate }: CodeGeneratorProps) {
-  const { sessionToken, isAuthenticated, context } = useAuthContext();
+  const { sessionToken, isAuthenticated, walletAddress } = useAuthContext();
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('preview');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [previewReloadTrigger, setPreviewReloadTrigger] = useState(0);
-
-  // Get wallet address from Farcaster context (custody address)
-  const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
 
   // Get balance data
   const { data: balance } = useQuery({

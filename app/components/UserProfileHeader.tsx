@@ -10,12 +10,9 @@ interface UserProfileHeaderProps {
 }
 
 export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
-  const { user, handleSessionExpired, context } = useAuthContext();
+  const { user, handleSessionExpired, walletAddress } = useAuthContext();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  // Get wallet address from Farcaster context if available (custody address)
-  const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
 
   // Close dropdown when clicking outside
   useEffect(() => {

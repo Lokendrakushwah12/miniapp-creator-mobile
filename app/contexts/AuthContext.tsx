@@ -17,6 +17,7 @@ interface AuthContextType {
   isLoading: boolean;
   isInMiniApp: boolean;
   context: Context.MiniAppContext | null;
+  walletAddress: string | null;
   handleSessionExpired: () => Promise<void>;
 }
 
