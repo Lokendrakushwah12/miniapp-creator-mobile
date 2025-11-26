@@ -232,7 +232,6 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
     const [currentStep, setCurrentStep] = useState<'form' | 'publishing' | 'success'>('form');
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [manifestUrl, setManifestUrl] = useState<string | null>(null);
     const [shareableLink, setShareableLink] = useState<string | null>(null);
     const [showConfetti, setShowConfetti] = useState(false);
     
@@ -262,7 +261,6 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
         if (isOpen) {
             setCurrentStep('form');
             setError(null);
-            setManifestUrl(null);
             setShareableLink(null);
             setShowConfetti(false);
         }
@@ -424,7 +422,6 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
             }
 
             logger.log('✅ Publish successful:', result);
-            setManifestUrl(result.manifestUrl);
             
             // The app's homeUrl is the shareable link - Farcaster recognizes it as a miniapp
             setShareableLink(homeUrl.trim());
@@ -452,7 +449,6 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
     const handleClose = () => {
         setCurrentStep('form');
         setError(null);
-        setManifestUrl(null);
         setShareableLink(null);
         setShowConfetti(false);
         setIsLoading(false);

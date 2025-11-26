@@ -18,27 +18,6 @@ interface NotificationPayload {
 }
 
 /**
- * Get notification tokens for a user (from Farcaster)
- * In Farcaster miniapps, users opt-in to notifications and the tokens are
- * stored when they enable notifications via the SDK
- */
-async function getUserNotificationTokens(userId: string): Promise<string[]> {
-  // For now, we'll use the user's FID as the identifier
-  // In a full implementation, you'd store notification tokens when users opt-in
-  try {
-    const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-    if (user?.farcasterFid) {
-      // Return the FID as a token - Farcaster will route it to the user
-      return [user.farcasterFid.toString()];
-    }
-    return [];
-  } catch (error) {
-    logger.error("Failed to get user notification tokens:", error);
-    return [];
-  }
-}
-
-/**
  * Send notification to a user via Farcaster
  */
 export async function sendNotification(
