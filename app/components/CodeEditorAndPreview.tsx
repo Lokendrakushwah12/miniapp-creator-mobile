@@ -2,7 +2,7 @@
 
 
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CodeEditor } from './CodeEditor';
 import { Preview } from './Preview';
 import { DevelopmentLogs } from './DevelopmentLogs';
@@ -39,6 +39,18 @@ export function CodeEditorAndPreview({
     previewReloadTrigger,
 }: CodeEditorAndPreviewProps) {
     const [showLogs, setShowLogs] = useState(false);
+    // Track generation ID - changes each time a new generation starts
+    const [generationId, setGenerationId] = useState<number>(0);
+    const wasGeneratingRef = useRef(false);
+
+    // Update generation ID when a new generation starts
+    useEffect(() => {
+        if (isGenerating && !wasGeneratingRef.current) {
+            // New generation started - create a new unique ID
+            setGenerationId(Date.now());
+        }
+        wasGeneratingRef.current = isGenerating;
+    }, [isGenerating]);
 
     // Hide logs when generation completes
     useEffect(() => {
@@ -52,6 +64,7 @@ export function CodeEditorAndPreview({
         return (
             <div className="h-full flex flex-col">
                 <DevelopmentLogs
+                    generationId={generationId} // Pass generation ID to persist/reset state correctly
                     onComplete={() => {
                         // Only hide logs if generation is actually complete
                         // Don't trigger onComplete if isGenerating is still true

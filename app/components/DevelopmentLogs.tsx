@@ -4,6 +4,7 @@ import { useEffect, useState, useRef } from 'react';
 
 interface DevelopmentLogsProps {
     onComplete: () => void;
+    generationId?: number; // Unique ID for this generation session
 }
 
 const BUILDING_STAGES = [
@@ -40,12 +41,25 @@ const TIPS = [
 const STORAGE_KEY = 'minidev_generation_progress';
 const TOTAL_TIME = 10 * 60 * 1000; // 10 minutes
 
-// Helper to get or initialize start time from sessionStorage
-function getStoredState(): { startTime: number; tipIndex: number } | null {
+interface StoredState {
+    startTime: number;
+    tipIndex: number;
+    generationId?: number;
+}
+
+// Helper to get stored state from sessionStorage
+function getStoredState(): StoredState | null {
     try {
         const stored = sessionStorage.getItem(STORAGE_KEY);
         if (stored) {
-            return JSON.parse(stored);
+            const state = JSON.parse(stored) as StoredState;
+            // Check if the stored state is stale (more than TOTAL_TIME has passed)
+            const elapsed = Date.now() - state.startTime;
+            if (elapsed >= TOTAL_TIME) {
+                sessionStorage.removeItem(STORAGE_KEY);
+                return null;
+            }
+            return state;
         }
     } catch {
         // Ignore errors
@@ -53,7 +67,7 @@ function getStoredState(): { startTime: number; tipIndex: number } | null {
     return null;
 }
 
-function setStoredState(state: { startTime: number; tipIndex: number }) {
+function setStoredState(state: StoredState) {
     try {
         sessionStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch {
@@ -69,31 +83,56 @@ function clearStoredState() {
     }
 }
 
-export function DevelopmentLogs({ onComplete }: DevelopmentLogsProps) {
-    // Initialize state from sessionStorage to persist across focus changes
+export function DevelopmentLogs({ onComplete, generationId }: DevelopmentLogsProps) {
+    // Initialize state - check if we should resume or start fresh
     const [startTime] = useState<number>(() => {
         const stored = getStoredState();
-        if (stored) {
+        
+        // If we have a stored state AND the generationId matches, resume
+        if (stored && generationId && stored.generationId === generationId) {
             return stored.startTime;
         }
+        
+        // Otherwise, start fresh
+        clearStoredState();
         const now = Date.now();
-        setStoredState({ startTime: now, tipIndex: 0 });
+        setStoredState({ startTime: now, tipIndex: 0, generationId });
         return now;
     });
     
-    const [currentStage, setCurrentStage] = useState(0);
-    const [progress, setProgress] = useState(() => {
-        // Calculate initial progress based on elapsed time
+    const [currentStage, setCurrentStage] = useState(() => {
         const stored = getStoredState();
-        if (stored) {
+        if (stored && generationId && stored.generationId === generationId) {
+            // Calculate initial stage based on elapsed time
+            const elapsed = Date.now() - stored.startTime;
+            const quickStageDurations = [60000, 70000, 80000, 90000, 70000, 60000, 50000, 40000, 80000];
+            let cumulativeTime = 0;
+            for (let i = 0; i < quickStageDurations.length; i++) {
+                cumulativeTime += quickStageDurations[i];
+                if (elapsed < cumulativeTime) {
+                    return i;
+                }
+            }
+            return quickStageDurations.length;
+        }
+        return 0;
+    });
+    
+    const [progress, setProgress] = useState(() => {
+        const stored = getStoredState();
+        if (stored && generationId && stored.generationId === generationId) {
             const elapsed = Date.now() - stored.startTime;
             return Math.min((elapsed / TOTAL_TIME) * 100, 100);
         }
         return 0;
     });
+    
     const [currentTipIndex, setCurrentTipIndex] = useState(() => {
         const stored = getStoredState();
-        return stored?.tipIndex || 0;
+        if (stored && generationId && stored.generationId === generationId) {
+            return stored.tipIndex;
+        }
+        return 0;
     });
     
     // Track if component has completed to prevent double onComplete calls
@@ -142,11 +181,8 @@ export function DevelopmentLogs({ onComplete }: DevelopmentLogsProps) {
         const tipRotation = setInterval(() => {
             setCurrentTipIndex((prev) => {
                 const newIndex = (prev + 1) % TIPS.length;
-                // Update stored tip index
-                const stored = getStoredState();
-                if (stored) {
-                    setStoredState({ ...stored, tipIndex: newIndex });
-                }
+                // Update stored tip index (preserve generationId)
+                setStoredState({ startTime, tipIndex: newIndex, generationId });
                 return newIndex;
             });
         }, 30000);
@@ -168,7 +204,7 @@ export function DevelopmentLogs({ onComplete }: DevelopmentLogsProps) {
             clearInterval(tipRotation);
             stageTimeouts.forEach(clearTimeout);
         };
-    }, [onComplete, startTime]);
+    }, [onComplete, startTime, generationId]);
 
     // Calculate circular progress stroke
     const circumference = 2 * Math.PI * 45; // radius = 45
