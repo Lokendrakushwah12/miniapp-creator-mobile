@@ -527,6 +527,7 @@ ${appType === 'farcaster' ? `
 - DO NOT create wrapper API routes for contract interactions
 - ONLY modify src/app/page.tsx and create components in src/components/
 ${appType === 'farcaster' ? '- For Web3 contracts: ONLY modify contracts/ directory' : '- For smart contracts: use wagmi hooks directly'}
+- 🚨 IMPORTANT: DO NOT modify src/app/layout.tsx metadata - it will be automatically generated with dynamic app name, description, and OG image
 
 CRITICAL: You MUST return ONLY valid JSON. No explanations, no text, no markdown, no code fences.
 
