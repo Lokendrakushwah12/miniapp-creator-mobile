@@ -1,6 +1,6 @@
 import { logger } from "../../../lib/logger";
 import { NextRequest, NextResponse } from "next/server";
-import { saveChatMessage, migrateChatMessages } from "../../../lib/database";
+import { saveChatMessage, createProject, getProjectsByUserId, updateProject } from "../../../lib/database";
 import { authenticateRequest } from "../../../lib/auth";
 import { db, chatMessages } from "../../../db";
 import { eq } from "drizzle-orm";
@@ -17,7 +17,7 @@ import { chatSessions } from "../../../lib/chatSessionManager";
 
 const sessionToProjectMap = new Map<string, string>(); // Maps sessionId to projectId
 
-// Helper function to load chat messages from database and hydrate memory cache
+// Helper function to load chat messages from database
 async function loadChatMessagesFromDB(projectId: string): Promise<ChatMessage[]> {
   try {
     const messages = await db.select().from(chatMessages)
@@ -46,15 +46,10 @@ async function saveMessageToDBAndCache(
   changedFiles?: string[]
 ): Promise<void> {
   try {
-    // Skip database save for temporary sessions (no draft project yet)
-    if (!projectId.startsWith('temp-')) {
-      // Save to database only for real projects
-      await saveChatMessage(projectId, role, content, phase, changedFiles);
-    } else {
-      logger.log(`💭 Message stored in memory only (no project yet): ${role}`);
-    }
+    // Save to database
+    await saveChatMessage(projectId, role, content, phase, changedFiles);
     
-    // Always update memory cache
+    // Update memory cache
     const session = chatSessions.get(projectId);
     if (session) {
       session.messages.push({
@@ -66,7 +61,7 @@ async function saveMessageToDBAndCache(
       });
     }
   } catch (error) {
-    logger.warn("Failed to save message to DB and cache:", error);
+    logger.error("Error saving chat message:", error);
   }
 }
 
@@ -145,7 +140,6 @@ async function callClaude(
   stream: boolean = false
 ): Promise<string | ReadableStream> {
   const apiKey = process.env.CLAUDE_API_KEY;
-  // logger.log("Claude API key:", apiKey);
   if (!apiKey) throw new Error("Claude API key not set");
 
   const requestBody = {
@@ -201,7 +195,6 @@ export async function POST(request: NextRequest) {
     }
 
     // SERVER-SIDE CREDIT VALIDATION
-    // Import at runtime to avoid issues if module doesn't exist yet
     const { validateCredits, trackCredits, captureCredits } = await import('../../../lib/creditValidation');
     
     let creditEventId: string | null = null;
@@ -216,11 +209,10 @@ export async function POST(request: NextRequest) {
             details: validation.error,
             currentCredits: validation.currentCredits
           },
-          { status: 402 } // 402 Payment Required
+          { status: 402 }
         );
       }
 
-      // Track credits before processing
       try {
         creditEventId = await trackCredits(walletAddress, 1);
         logger.log('Server-side credit tracking initiated:', creditEventId);
@@ -232,9 +224,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Add exponential backoff retry logic for Claude API calls
-    const maxRetries = 5; // Increased retries
-    const baseDelay = 1000; // 1 second base delay
+    // Retry logic for Claude API calls
+    const maxRetries = 5;
+    const baseDelay = 1000;
     
     async function retryClaudeCall(systemPrompt: string, message: string, stream: boolean) {
       let lastError;
@@ -245,10 +237,9 @@ export async function POST(request: NextRequest) {
         } catch (error) {
           lastError = error;
           
-          // Check if error is due to overload
           if (error instanceof Error && error.message.includes('overloaded_error')) {
-            const exponentialDelay = baseDelay * Math.pow(2, i); // Exponential backoff
-            const jitter = Math.random() * 1000; // Add random jitter up to 1 second
+            const exponentialDelay = baseDelay * Math.pow(2, i);
+            const jitter = Math.random() * 1000;
             const totalDelay = exponentialDelay + jitter;
             
             logger.log(`Claude API overloaded, retry attempt ${i + 1} of ${maxRetries}. Waiting ${totalDelay}ms`);
@@ -256,7 +247,7 @@ export async function POST(request: NextRequest) {
             continue;
           }
           
-          throw error; // Throw non-overload errors immediately
+          throw error;
         }
       }
       
@@ -266,13 +257,12 @@ export async function POST(request: NextRequest) {
     // Determine the project ID to use
     let currentProjectId = projectId;
     
-    // If no projectId provided, we need to create one for this chat session
     if (!currentProjectId) {
-      // Check if this session already has a project mapped (in-memory)
+      // Check if this session already has a project mapped
       const mappedProjectId = sessionToProjectMap.get(sessionId);
       
-      // If we have a mapped project, verify it's still valid (not completed)
       if (mappedProjectId) {
+        // Verify it's still a valid draft project
         try {
           const projectMessages = await db.select().from(chatMessages)
             .where(eq(chatMessages.projectId, mappedProjectId))
@@ -286,7 +276,7 @@ export async function POST(request: NextRequest) {
           );
           
           if (hasCompletionMessage) {
-            logger.log(`🚫 Clearing stale mapping for session ${sessionId} - project ${mappedProjectId} is completed`);
+            logger.log(`🚫 Clearing stale mapping for session ${sessionId} - project is completed`);
             sessionToProjectMap.delete(sessionId);
           } else {
             currentProjectId = mappedProjectId;
@@ -294,33 +284,25 @@ export async function POST(request: NextRequest) {
           }
         } catch (error) {
           logger.warn(`Failed to verify mapped project ${mappedProjectId}:`, error);
-          // On error, clear the mapping to be safe
           sessionToProjectMap.delete(sessionId);
         }
       }
       
-      // If not in memory (or mapping was invalid), check database for existing draft projects
-      // ONLY if this is truly a continuation (recent messages in the last 5 minutes)
+      // Check for existing recent draft project
       if (!currentProjectId) {
         try {
-          const { getProjectsByUserId } = await import('../../../lib/database');
           const userProjects = await getProjectsByUserId(user.id);
           
-          // Look for VERY recent draft project that's actively being used
-          // Changed from 24 hours to 5 minutes to prevent cross-chat contamination
           const recentDraft = await (async () => {
             for (const p of userProjects) {
-              if (p.vercelUrl || p.previewUrl) continue; // Skip deployed projects
+              if (p.vercelUrl || p.previewUrl) continue;
               
-              // Use updatedAt (last message time) instead of createdAt for better accuracy
               const timeSinceLastUpdate = Date.now() - new Date(p.updatedAt || p.createdAt).getTime();
-              const isActivelyUsed = timeSinceLastUpdate < 5 * 60 * 1000; // Within 5 minutes
-              const isDraft = p.name.startsWith('Chat Project');
+              const isActivelyUsed = timeSinceLastUpdate < 5 * 60 * 1000; // 5 minutes
+              const isDraft = p.name.startsWith('Draft:');
               
               if (!isActivelyUsed || !isDraft) continue;
               
-              // Additional check: Don't reuse projects that have completion messages
-              // This prevents reusing finished projects even if they're recent
               try {
                 const projectMessages = await db.select().from(chatMessages)
                   .where(eq(chatMessages.projectId, p.id))
@@ -334,11 +316,10 @@ export async function POST(request: NextRequest) {
                 );
                 
                 if (hasCompletionMessage) {
-                  logger.log(`🚫 Skipping project ${p.id} - has completion messages (finished project)`);
                   continue;
                 }
                 
-                logger.log(`✅ Found active draft project: ${p.name}, id: ${p.id}, timeSinceUpdate: ${timeSinceLastUpdate}ms`);
+                logger.log(`✅ Found active draft project: ${p.name}, id: ${p.id}`);
                 return p;
               } catch (error) {
                 logger.warn(`Failed to check messages for project ${p.id}:`, error);
@@ -351,30 +332,41 @@ export async function POST(request: NextRequest) {
           if (recentDraft) {
             currentProjectId = recentDraft.id;
             sessionToProjectMap.set(sessionId, currentProjectId);
-            logger.log(`📎 Resuming ACTIVE draft project ${currentProjectId} for session ${sessionId} (last updated within 5 min)`);
-          } else {
-            logger.log(`🚫 No active draft found - will create new project for fresh chat`);
+            logger.log(`📎 Resuming draft project ${currentProjectId}`);
           }
         } catch (error) {
           logger.warn("Failed to check for existing draft projects:", error);
         }
       }
       
-      // NO DRAFT PROJECTS - Messages stay in memory until user confirms building
-      // Project will be created during the generation phase with proper name
+      // Create a new draft project if none exists
       if (!currentProjectId) {
-        logger.log(`💬 No project yet - messages will be stored in memory until building phase`);
-        // Use sessionId as temporary identifier for in-memory messages
-        currentProjectId = `temp-${sessionId}`;
+        logger.log(`📝 Creating new draft project for session ${sessionId}`);
+        
+        const now = new Date();
+        const dateStr = now.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+        
+        const newProject = await createProject(
+          user.id,
+          `Draft: ${dateStr} ${timeStr}`,
+          message.substring(0, 200), // Use first message as description
+          undefined,
+          undefined,
+          appType
+        );
+        
+        currentProjectId = newProject.id;
+        sessionToProjectMap.set(sessionId, currentProjectId);
+        logger.log(`✅ Created draft project ${currentProjectId}`);
       }
     } else {
       logger.log(`📌 Using provided projectId: ${currentProjectId}`);
     }
 
-    // Get or create chat session (using projectId as key for proper mapping)
+    // Get or create chat session
     let session = chatSessions.get(currentProjectId);
     if (!session) {
-      // Load existing messages from database
       const existingMessages = await loadChatMessagesFromDB(currentProjectId);
       
       session = {
@@ -386,18 +378,14 @@ export async function POST(request: NextRequest) {
       logger.log(`Loaded ${existingMessages.length} messages from DB for project ${currentProjectId}`);
     }
 
-    // Sync project's appType with user's selection if it differs
-    // This ensures the project uses the correct boilerplate when generated
+    // Update project appType if needed
     try {
-      const { updateProject } = await import('../../../lib/database');
       await updateProject(currentProjectId, { appType });
-      logger.log(`✅ Project ${currentProjectId} appType synced to: ${appType}`);
     } catch (error) {
-      logger.warn(`⚠️ Failed to sync project appType:`, error);
-      // Non-critical error - continue with chat flow
+      logger.warn(`Failed to update project appType:`, error);
     }
 
-    // Save user message to database and update cache
+    // Save user message
     await saveMessageToDBAndCache(
       currentProjectId, 
       "user", 
@@ -406,7 +394,6 @@ export async function POST(request: NextRequest) {
     );
 
     if (stream) {
-      // Handle streaming response
       const conversationHistory = session.messages
         .map((m) => `${m.role}: ${m.content}`)
         .join("\n");
@@ -432,10 +419,8 @@ export async function POST(request: NextRequest) {
         },
       });
     } else {
-      // Handle non-streaming response
       let aiResponse: string;
 
-      // Check if user has confirmed the proposal
       const userConfirmed =
         message.toLowerCase().includes("yes") ||
         message.toLowerCase().includes("proceed") ||
@@ -478,7 +463,7 @@ export async function POST(request: NextRequest) {
         aiResponse = await retryClaudeCall(systemPrompt, message, false) as string;
       }
 
-      // Save AI message to database and update cache
+      // Save AI response
       await saveMessageToDBAndCache(
         currentProjectId, 
         "ai", 
@@ -486,15 +471,12 @@ export async function POST(request: NextRequest) {
         action === "confirm_project" ? "building" : "requirements"
       );
 
-      // Update project name from AI response if this is the first AI response
-      // This replaces generic "Chat Project Nov 21" with actual project name
+      // Update project name from first AI response
       if (session.messages.filter(m => m.role === 'ai').length === 0) {
         try {
-          // Extract project name from AI response (look for quoted names or "App Concept:" patterns)
           const nameMatch = aiResponse.match(/["']([^"']{5,50})["']|App Concept:\s*["']?([^"\n]{5,50})["']?/i);
           if (nameMatch) {
             const extractedName = (nameMatch[1] || nameMatch[2]).trim();
-            const { updateProject } = await import('../../../lib/database');
             await updateProject(currentProjectId, { 
               name: extractedName,
               description: message.substring(0, 200)
@@ -503,7 +485,6 @@ export async function POST(request: NextRequest) {
           }
         } catch (error) {
           logger.warn('Failed to extract/update project name:', error);
-          // Non-critical - continue
         }
       }
 
@@ -542,10 +523,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Missing projectId" }, { status: 400 });
     }
 
-    // Load messages from database
     const messages = await loadChatMessagesFromDB(projectId);
     
-    // Update memory cache
     const session = chatSessions.get(projectId);
     if (session) {
       session.messages = messages;
@@ -580,7 +559,6 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Authenticate the user
     const { user, isAuthorized, error } = await authenticateRequest(request);
     if (!isAuthorized || !user) {
       return NextResponse.json(
@@ -589,7 +567,7 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Migrate chat messages
+    const { migrateChatMessages } = await import('../../../lib/database');
     const migratedMessages = await migrateChatMessages(fromProjectId, toProjectId);
 
     return NextResponse.json({
