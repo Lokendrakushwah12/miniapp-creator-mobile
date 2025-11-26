@@ -95,14 +95,30 @@ export function useFarcasterAuth() {
     try {
       console.log('💰 [useFarcasterAuth] Getting wallet address from Farcaster SDK...');
       
-      // Try to get connected accounts from the ethProvider
-      const accounts = await sdk.wallet.ethProvider.request({
+      // First check if accounts are already connected
+      let accounts = await sdk.wallet.ethProvider.request({
         method: 'eth_accounts',
       });
       
       console.log('💰 [useFarcasterAuth] eth_accounts result:', accounts);
       
+      // If no accounts connected, request connection
+      // This will prompt the user in Warpcast to approve wallet access
+      if (!accounts || accounts.length === 0) {
+        console.log('💰 [useFarcasterAuth] No accounts found, requesting connection...');
+        try {
+          accounts = await sdk.wallet.ethProvider.request({
+            method: 'eth_requestAccounts',
+          });
+          console.log('💰 [useFarcasterAuth] eth_requestAccounts result:', accounts);
+        } catch (requestError) {
+          console.log('💰 [useFarcasterAuth] Wallet connection request failed or was rejected:', requestError);
+          return null;
+        }
+      }
+      
       if (accounts && accounts.length > 0) {
+        console.log('💰 [useFarcasterAuth] Connected wallet:', accounts[0]);
         return accounts[0];
       }
       
