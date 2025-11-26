@@ -1,11 +1,11 @@
 import { pgTable, uuid, text, timestamp, integer, jsonb, boolean } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
-// Users table (linked to Privy)
+// Users table (linked to Farcaster)
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
-  privyUserId: text('privy_user_id').unique().notNull(),
-  email: text('email'),
+  farcasterFid: integer('farcaster_fid').unique().notNull(),
+  username: text('username'),
   displayName: text('display_name'),
   pfpUrl: text('pfp_url'),
   createdAt: timestamp('created_at').defaultNow().notNull(),
@@ -63,7 +63,7 @@ export const projectDeployments = pgTable('project_deployments', {
   createdAt: timestamp('created_at').defaultNow().notNull(),
 });
 
-// User sessions table (for Privy integration)
+// User sessions table (for Farcaster integration)
 export const userSessions = pgTable('user_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }).notNull(),

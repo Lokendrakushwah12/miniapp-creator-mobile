@@ -15,21 +15,21 @@ export interface GenerationJobContext {
 }
 
 // User management functions
-export async function createUser(privyUserId: string, email?: string, displayName?: string, pfpUrl?: string) {
+export async function createUser(farcasterFid: number, username?: string, displayName?: string, pfpUrl?: string) {
   const [user] = await db.insert(users).values({
-    privyUserId,
-    email,
+    farcasterFid,
+    username,
     displayName,
     pfpUrl,
   }).returning();
   return user;
 }
 
-export async function getUserByPrivyId(privyUserId: string) {
+export async function getUserByFarcasterFid(farcasterFid: number) {
   try {
     
     // Add a timeout to prevent hanging
-    const queryPromise = db.select().from(users).where(eq(users.privyUserId, privyUserId));
+    const queryPromise = db.select().from(users).where(eq(users.farcasterFid, farcasterFid));
     const timeoutPromise = new Promise((_, reject) => 
       setTimeout(() => reject(new Error('Database query timeout')), 10000)
     );
@@ -37,7 +37,7 @@ export async function getUserByPrivyId(privyUserId: string) {
     const [user] = await Promise.race([queryPromise, timeoutPromise]) as typeof users.$inferSelect[];
     return user;
   } catch (error) {
-    logger.error('❌ getUserByPrivyId error:', error);
+    logger.error('❌ getUserByFarcasterFid error:', error);
     throw error;
   }
 }
@@ -315,7 +315,7 @@ export async function getUserBySessionToken(sessionToken: string) {
 export async function updateUser(
   userId: string,
   updates: {
-    email?: string;
+    username?: string;
     displayName?: string;
     pfpUrl?: string;
   }
@@ -331,8 +331,8 @@ export async function updateUser(
   };
   
   // Explicitly handle each field to convert undefined to null
-  if ('email' in updates) {
-    updatePayload.email = updates.email ?? null;
+  if ('username' in updates) {
+    updatePayload.username = updates.username ?? null;
   }
   if ('displayName' in updates) {
     updatePayload.displayName = updates.displayName ?? null;
@@ -354,7 +354,7 @@ export async function updateUser(
     id: user.id,
     displayName: user.displayName,
     pfpUrl: user.pfpUrl,
-    email: user.email
+    username: user.username
   });
 
   return user;

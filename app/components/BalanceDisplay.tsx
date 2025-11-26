@@ -1,12 +1,11 @@
 "use client";
 import { logger } from "../../lib/logger";
 
-import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { useQuery } from "@tanstack/react-query";
 import type { EarnKit, UserBalance } from "@earnkit/earn";
 import TopUpDialog from "./top-up-dialog";
 import { Button } from "./ui/button";
-import WalletButton from "./WalletButton";
+import { useAuthContext } from "../contexts/AuthContext";
 
 interface BalanceDisplayProps {
     activeAgent: EarnKit;
@@ -14,22 +13,18 @@ interface BalanceDisplayProps {
 }
 
 export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDisplayProps) {
-    const { ready, authenticated, linkWallet } = usePrivy();
-    const { wallets } = useWallets();
-    const walletAddress = wallets[0]?.address;
-
-    // Check if user only has embedded wallet
-    const hasOnlyEmbeddedWallet = wallets.length > 0 && 
-        wallets.every(w => w.walletClientType === 'privy');
+    const { isAuthenticated, context } = useAuthContext();
+    
+    // Get wallet address from Farcaster context verifications (custody address)
+    // Note: In Farcaster miniapps, wallet operations go through sdk.wallet actions
+    const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
 
     logger.log('💰 BalanceDisplay render:', {
-        ready,
-        authenticated,
-        hasWallet: !!wallets[0],
+        isAuthenticated,
+        hasWallet: !!walletAddress,
         walletAddress: walletAddress ? `${walletAddress.substring(0, 6)}...` : 'none',
         feeModelType,
         hasActiveAgent: !!activeAgent,
-        hasOnlyEmbeddedWallet
     });
 
     // Balance fetching with React Query (only if activeAgent exists)
@@ -39,7 +34,7 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
             if (!walletAddress || !activeAgent) throw new Error("Wallet not connected or agent not available");
             return activeAgent.getBalance({ walletAddress });
         },
-        enabled: !!activeAgent && !!walletAddress && ready && authenticated,
+        enabled: !!activeAgent && !!walletAddress && isAuthenticated,
         placeholderData: { eth: "0", credits: "0" },
         staleTime: 1000 * 30, // 30 seconds
         refetchInterval: 1000 * 60, // Refetch every minute
@@ -50,30 +45,23 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
         refetchBalance();
     };
 
-    // If no activeAgent (credits disabled), just show wallet button for auth
+    // If no activeAgent (credits disabled), show nothing
     if (!activeAgent) {
-        return <WalletButton />;
+        return null;
     }
 
-    // Show wallet button if not authenticated
-    if (!ready || !authenticated || !walletAddress) {
-        return <WalletButton />;
+    // Show message if not authenticated or no wallet
+    if (!isAuthenticated || !walletAddress) {
+        return (
+            <div className="flex items-center gap-2 text-sm text-gray-500">
+                <span>Connect wallet in Warpcast to view balance</span>
+            </div>
+        );
     }
 
     // Show balance and top-up when authenticated and credits enabled
     return (
         <div className="flex items-center gap-3">
-            {hasOnlyEmbeddedWallet && (
-                <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={linkWallet}
-                    className="px-3 py-1.5 text-xs font-medium text-black-60 transition-colors cursor-pointer rounded-3xl"
-                    title="Currently using temporary wallet. Click to connect your own wallet (MetaMask, Coinbase, etc.)"
-                >
-                    Connect Wallet
-                </Button>
-            )}
             <div className="flex items-center gap-2">
                 <span className="text-sm text-black-60">
                     Balance: {loading ? "..." : balance ? `${balance.credits} Credits` : "0 Credits"}
@@ -95,5 +83,3 @@ export default function BalanceDisplay({ activeAgent, feeModelType }: BalanceDis
         </div>
     );
 }
-
-

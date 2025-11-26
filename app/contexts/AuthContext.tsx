@@ -1,26 +1,29 @@
 'use client';
 
 import { createContext, useContext, ReactNode } from 'react';
-import { useAuth } from '../hooks/useAuth';
+import { useFarcasterAuth } from '../hooks/useFarcasterAuth';
+import type { Context } from '@farcaster/miniapp-core';
 
 interface AuthContextType {
   isAuthenticated: boolean;
   sessionToken: string | null;
   user: {
     id: string;
-    privyUserId: string;
-    email?: string;
+    farcasterFid: number;
+    username?: string;
     displayName?: string;
     pfpUrl?: string;
   } | null;
   isLoading: boolean;
+  isInMiniApp: boolean;
+  context: Context.MiniAppContext | null;
   handleSessionExpired: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const authState = useAuth();
+  const authState = useFarcasterAuth();
 
   return (
     <AuthContext.Provider value={authState}>

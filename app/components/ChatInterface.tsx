@@ -7,7 +7,6 @@ import Image from 'next/image';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useAuthContext } from '../contexts/AuthContext';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { EarnKit } from '@earnkit/earn';
 import { toast } from 'react-hot-toast';
@@ -59,11 +58,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     const [appType, setAppType] = useState<'farcaster' | 'web3'>(initialAppType);
     const chatBottomRef = useRef<HTMLDivElement>(null);
     const chatContainerRef = useRef<HTMLDivElement>(null);
-    const { sessionToken, user } = useAuthContext();
-    const { ready: privyReady, authenticated } = usePrivy();
-    const { wallets } = useWallets();
+    const { sessionToken, user, isAuthenticated, context } = useAuthContext();
     const queryClient = useQueryClient();
-    const walletAddress = wallets[0]?.address;
+    const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
 
     // Check user's credit balance
     const { data: balance } = useQuery({
@@ -72,7 +69,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
             if (!walletAddress || !activeAgent) throw new Error("Wallet not connected");
             return activeAgent.getBalance({ walletAddress });
         },
-        enabled: !!walletAddress && !!activeAgent && privyReady && authenticated,
+        enabled: !!walletAddress && !!activeAgent && isAuthenticated,
         placeholderData: { eth: "0", credits: "0" },
         staleTime: 1000 * 30,
     });
@@ -1313,7 +1310,7 @@ Please build this project with all the features and requirements discussed above
                                 ) : (
                                     <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-pink-500 flex items-center justify-center flex-shrink-0 mt-1">
                                         <span className="text-white font-medium text-xs">
-                                            {user?.displayName?.charAt(0).toUpperCase() || user?.email?.charAt(0).toUpperCase() || 'U'}
+                                            {user?.displayName?.charAt(0).toUpperCase() || user?.username?.charAt(0).toUpperCase() || 'U'}
                                         </span>
                                     </div>
                                 )

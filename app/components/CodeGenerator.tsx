@@ -5,9 +5,7 @@ import { useState } from 'react';
 import { CodeEditorAndPreview } from './CodeEditorAndPreview';
 import { PublishModal } from './PublishModal';
 import TopUpDialog from './top-up-dialog';
-import WalletButton from './WalletButton';
 import { useAuthContext } from '../contexts/AuthContext';
-import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { useQuery } from '@tanstack/react-query';
 import type { EarnKit } from '@earnkit/earn';
 import {
@@ -43,16 +41,14 @@ interface CodeGeneratorProps {
 }
 
 export function CodeGenerator({ currentProject, isGenerating = false, onOpenSidebar, activeAgent, feeModelType, selectedAppType, onSelectTemplate }: CodeGeneratorProps) {
-  const { sessionToken } = useAuthContext();
+  const { sessionToken, isAuthenticated, context } = useAuthContext();
   const [viewMode, setViewMode] = useState<'code' | 'preview'>('preview');
   const [showPublishModal, setShowPublishModal] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [previewReloadTrigger, setPreviewReloadTrigger] = useState(0);
 
-  // For balance display
-  const { ready: privyReady, authenticated } = usePrivy();
-  const { wallets } = useWallets();
-  const walletAddress = wallets[0]?.address;
+  // Get wallet address from Farcaster context (custody address)
+  const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
 
   // Get balance data
   const { data: balance } = useQuery({
@@ -61,7 +57,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
       if (!walletAddress || !activeAgent) throw new Error("Wallet not connected");
       return activeAgent.getBalance({ walletAddress });
     },
-    enabled: !!walletAddress && !!activeAgent && privyReady && authenticated,
+    enabled: !!walletAddress && !!activeAgent && isAuthenticated,
     placeholderData: { eth: "0", credits: "0" },
     staleTime: 1000 * 30,
   });
@@ -224,8 +220,8 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
                   </TopUpDialog>
                 </>
               ) : (
-                /* Connect Wallet Button - Show when no wallet is connected */
-                <WalletButton />
+                /* Message when no wallet is connected */
+                <span className="text-sm text-gray-500">Connect wallet in Warpcast</span>
               )}
             </div>
           )}

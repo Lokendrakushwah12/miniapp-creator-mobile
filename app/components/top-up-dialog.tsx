@@ -10,13 +10,14 @@ import {
     DialogTrigger,
 } from "./ui/dialog";
 import { Button } from "./ui/button";
-import { usePrivy, useWallets } from "@privy-io/react-auth";
+import { useAuthContext } from "../contexts/AuthContext";
 import { useQueryClient } from "@tanstack/react-query";
 import type { EarnKit, TopUpOption, UserBalance } from "@earnkit/earn";
 import { useEffect, useState } from "react";
 import { toast } from "react-hot-toast";
-import { createWalletClient, custom, keccak256, parseAbi, toBytes } from "viem";
+import { keccak256, toBytes, encodeFunctionData, parseAbi } from "viem";
 import { base } from "viem/chains";
+import { sdk } from "@farcaster/miniapp-sdk";
 
 interface EscrowContract {
     address: string;
@@ -51,8 +52,8 @@ export default function TopUpDialog({
     const [open, setOpen] = useState<boolean>(false);
     const [processingOption, setProcessingOption] = useState<string | null>(null);
 
-    const { ready, authenticated } = usePrivy();
-    const { wallets } = useWallets();
+    const { isAuthenticated, context } = useAuthContext();
+    const walletAddress = (context?.user as { custody_address?: string })?.custody_address;
     const queryClient = useQueryClient();
 
     // Data Fetching - fetch top-up details when dialog opens
@@ -78,16 +79,16 @@ export default function TopUpDialog({
         }
     }, [open, activeAgent, topUpOptions]);
 
-    // Core Logic - handle top-up transaction using contract call
+    // Core Logic - handle top-up transaction using Farcaster SDK wallet
     const handleTopUp = async (option: TopUpOption) => {
         // Guard clauses
-        if (!ready || !authenticated) {
-            toast.error("Please connect your wallet first");
+        if (!isAuthenticated) {
+            toast.error("Please authenticate first");
             return;
         }
 
-        if (!wallets[0]?.address) {
-            toast.error("No wallet connected");
+        if (!walletAddress) {
+            toast.error("No wallet connected. Please connect your wallet in Warpcast settings.");
             return;
         }
 
@@ -96,83 +97,83 @@ export default function TopUpDialog({
             return;
         }
 
-        const wallet = wallets[0];
         setProcessingOption(option.label);
 
         let txToast: string | undefined;
         try {
             txToast = toast.loading("Preparing transaction...");
 
-            // Switch to Base network
-            await wallet.switchChain(base.id);
-
-            // Get Ethereum provider
-            const eip1193 = await wallet.getEthereumProvider();
-
-            // Create wallet client
-            const walletClient = createWalletClient({
-                chain: base,
-                transport: custom(eip1193),
-                account: wallet.address as `0x${string}`,
-            });
-
             // Parse ABI for deposit function
             const abi = parseAbi([
                 "function deposit(bytes32 agentId) external payable"
             ]);
 
-            const toastSending = toast.loading("Sending transaction...", { id: txToast });
+            const toastSending = toast.loading("Sending transaction via Farcaster...", { id: txToast });
 
             const agentId = keccak256(toBytes(escrowContract.depositFunction.agentIdParam));
-            // Call the deposit function with agentId using walletClient directly
-            const hash = await walletClient.writeContract({
-                address: escrowContract.address as `0x${string}`,
+            
+            // Encode the function data for the deposit call
+            const data = encodeFunctionData({
                 abi,
                 functionName: 'deposit',
-                args: [agentId],
-                value: BigInt(option.value)
+                args: [agentId as `0x${string}`],
             });
+            
+            // Use Farcaster SDK ethProvider to send the transaction
+            const hash = await sdk.wallet.ethProvider.request({
+                method: 'eth_sendTransaction',
+                params: [{
+                    to: escrowContract.address as `0x${string}`,
+                    value: `0x${BigInt(option.value).toString(16)}` as `0x${string}`,
+                    data,
+                    chainId: `0x${base.id.toString(16)}` as `0x${string}`,
+                }],
+            }) as `0x${string}`;
 
-            logger.log("Transaction hash:", hash);
-            toast.dismiss(toastSending);
-            toast.success("Transaction sent! Processing...", { id: txToast });
+            if (hash) {
+                logger.log("Transaction hash:", hash);
+                toast.dismiss(toastSending);
+                toast.success("Transaction sent! Processing...", { id: txToast });
 
-            // Submit transaction to SDK
-            await activeAgent.submitTopUpTransaction({
-                txHash: hash,
-                walletAddress: wallet.address,
-                amountInUSD: option.amountInUSD,
-                amountInEth: option.amountInEth,
-                creditsToTopUp: option.creditsToTopUp,
-            });
-            logger.log("submitTopUpTransaction");
+                // Submit transaction to SDK
+                await activeAgent.submitTopUpTransaction({
+                    txHash: hash,
+                    walletAddress: walletAddress,
+                    amountInUSD: option.amountInUSD,
+                    amountInEth: option.amountInEth,
+                    creditsToTopUp: option.creditsToTopUp,
+                });
+                logger.log("submitTopUpTransaction");
 
-            // Get current balance for polling comparison
-            const currentBalance = await activeAgent.getBalance({
-                walletAddress: wallet.address,
-            });
-            logger.log(currentBalance, "currentBalance");
+                // Get current balance for polling comparison
+                const currentBalance = await activeAgent.getBalance({
+                    walletAddress: walletAddress,
+                });
+                logger.log(currentBalance, "currentBalance");
 
-            // Poll for balance update
-            activeAgent.pollForBalanceUpdate({
-                walletAddress: wallet.address,
-                initialBalance: currentBalance,
-                onConfirmation: (newBalance: UserBalance) => {
-                    toast.success("Top-up successful! Balance updated.", { id: txToast });
-                    // Invalidate balance query to trigger refetch
-                    queryClient.invalidateQueries({ queryKey: ["balance"] });
-                    onSuccess(newBalance);
-                    setOpen(false);
-                },
-                onTimeout: () => {
-                    toast.error(
-                        "Transaction timeout. Please check your balance manually.",
-                        {
-                            id: txToast,
-                        },
-                    );
-                },
-            });
+                // Poll for balance update
+                activeAgent.pollForBalanceUpdate({
+                    walletAddress: walletAddress,
+                    initialBalance: currentBalance,
+                    onConfirmation: (newBalance: UserBalance) => {
+                        toast.success("Top-up successful! Balance updated.", { id: txToast });
+                        // Invalidate balance query to trigger refetch
+                        queryClient.invalidateQueries({ queryKey: ["balance"] });
+                        onSuccess(newBalance);
+                        setOpen(false);
+                    },
+                    onTimeout: () => {
+                        toast.error(
+                            "Transaction timeout. Please check your balance manually.",
+                            {
+                                id: txToast,
+                            },
+                        );
+                    },
+                });
+            } else {
+                toast.error("Transaction was not completed", { id: txToast });
+            }
         } catch (error) {
             logger.log("Top-up error:", error);
             toast.error("Top-up failed. See console for details.");
@@ -235,7 +236,7 @@ export default function TopUpDialog({
                                         </div>
                                         <Button
                                             onClick={() => handleTopUp(option)}
-                                            disabled={processingOption === option.label}
+                                            disabled={processingOption === option.label || !walletAddress}
                                             className="shrink-0 px-4 py-2 text-xs font-medium rounded-3xl bg-black hover:bg-pink group-hover:bg-pink text-white disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed transition-colors"
                                         >
                                             {processingOption === option.label
@@ -249,7 +250,7 @@ export default function TopUpDialog({
                                     <Button
                                         key={`${option.label}-${option.amountInEth}-${index}`}
                                         onClick={() => handleTopUp(option)}
-                                        disabled={processingOption === option.label}
+                                        disabled={processingOption === option.label || !walletAddress}
                                         className="w-full p-4 text-sm font-medium rounded-xl border border-black-20 bg-white text-black hover:bg-black-5 hover:border-black-30 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
                                     >
                                         {processingOption === option.label
@@ -265,15 +266,15 @@ export default function TopUpDialog({
                             </span>
                         </div>
                     )}
+                    
+                    {!walletAddress && (
+                        <div className="text-center py-3 text-sm text-amber-600 bg-amber-50 rounded-lg">
+                            Connect your wallet in Warpcast settings to top up.
+                        </div>
+                    )}
                 </div>
 
             </DialogContent>
         </Dialog>
     );
 }
-
-
-
-
-
-

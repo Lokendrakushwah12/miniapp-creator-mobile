@@ -1,7 +1,7 @@
 'use client';
 
 import { useAuthContext } from '../contexts/AuthContext';
-import { EmailLogin } from './EmailLogin';
+import { FarcasterLogin } from './FarcasterLogin';
 
 export default function ProtectedRoute({ children }: { children: React.ReactNode }) {
     const { isAuthenticated, isLoading } = useAuthContext();
@@ -18,7 +18,7 @@ export default function ProtectedRoute({ children }: { children: React.ReactNode
 
     if (!isAuthenticated) {
         return (
-            <EmailLogin />
+            <FarcasterLogin />
         );
     }
 

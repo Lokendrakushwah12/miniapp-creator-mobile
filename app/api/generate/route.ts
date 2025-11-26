@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import fs from "fs-extra";
 import path from "path";
 import { v4 as uuidv4 } from "uuid";
-import { createProject, saveProjectFiles, savePatch, getUserById, getUserByPrivyId, createUser, getProjectById, getProjectFiles } from "../../../lib/database";
+import { createProject, saveProjectFiles, savePatch, getUserById, createUser, getProjectById, getProjectFiles } from "../../../lib/database";
 import { authenticateRequest } from "../../../lib/auth";
 import { logger, logApiRequest, logErrorWithContext } from "../../../lib/logger";
 import {
@@ -517,12 +517,14 @@ export async function POST(request: NextRequest) {
         // For testing: Ensure test user exists in database before creating job
         // (generation_jobs table has foreign key constraint on user_id)
         try {
-          let dbUser = await getUserByPrivyId(testUserId);
+          let dbUser = await getUserById(testUserId);
           if (!dbUser) {
             logger.info("Creating test user in database", { requestId, testUserId });
+            // Use a test FID for testing purposes
+            const testFid = 999999;
             dbUser = await createUser(
-              testUserId, // Use UUID as privyUserId
-              "test@example.com",
+              testFid,
+              "test_user",
               "Test User",
               undefined
             );
@@ -531,8 +533,8 @@ export async function POST(request: NextRequest) {
 
           user = {
             id: dbUser.id,
-            privyUserId: dbUser.privyUserId,
-            email: dbUser.email ?? "test@example.com",
+            farcasterFid: dbUser.farcasterFid,
+            username: dbUser.username ?? "test_user",
             displayName: dbUser.displayName ?? "Test User",
           };
         } catch (dbError) {
@@ -560,7 +562,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Missing prompt" }, { status: 400 });
       }
 
-      logger.log(`📝 Creating generation job for user: ${user.email || user.id}`);
+      logger.log(`📝 Creating generation job for user: ${user.displayName || user.username || user.id}`);
       logger.log(`📋 Prompt: ${prompt.substring(0, 100)}...`);
       logger.log(`🎯 App Type: ${appType}`);
       logger.log(`🔑 Session ID: ${sessionId || 'none'}`);
@@ -635,9 +637,10 @@ export async function POST(request: NextRequest) {
         let dbUser = await getUserById(testUserId);
         if (!dbUser) {
           logger.info("Creating test user in database", { requestId, testUserId });
+          const testFid = 999999;
           dbUser = await createUser(
-            testUserId, // Use UUID as privyUserId too
-            "test@example.com",
+            testFid,
+            "test_user",
             "Test User",
             undefined
           );
@@ -646,8 +649,8 @@ export async function POST(request: NextRequest) {
 
         user = {
           id: dbUser.id,
-          privyUserId: dbUser.privyUserId,
-          email: dbUser.email ?? "test@example.com",
+          farcasterFid: dbUser.farcasterFid,
+          username: dbUser.username ?? "test_user",
           displayName: dbUser.displayName ?? "Test User",
         };
       } catch (dbError) {
@@ -655,8 +658,8 @@ export async function POST(request: NextRequest) {
         // Fallback to mock user (database save will be skipped)
         user = {
           id: testUserId,
-          privyUserId: testUserId,
-          email: "test@example.com",
+          farcasterFid: 999999,
+          username: "test_user",
           displayName: "Test User",
         };
       }
@@ -1049,9 +1052,10 @@ export async function PATCH(request: NextRequest) {
         if (!dbUser) {
           logger.log("🔧 Creating test user in database...");
           try {
+            const testFid = 999999;
             dbUser = await createUser(
-              testUserId, // Use UUID as privyUserId too
-              "test@example.com",
+              testFid,
+              "test_user",
               "Test User",
               undefined
             );
@@ -1070,8 +1074,8 @@ export async function PATCH(request: NextRequest) {
 
         user = {
           id: dbUser.id,
-          privyUserId: dbUser.privyUserId,
-          email: dbUser.email ?? "test@example.com",
+          farcasterFid: dbUser.farcasterFid,
+          username: dbUser.username ?? "test_user",
           displayName: dbUser.displayName ?? "Test User",
         };
       } catch (dbError) {
@@ -1079,8 +1083,8 @@ export async function PATCH(request: NextRequest) {
         // Fallback to mock user (database save will be skipped)
         user = {
           id: testUserId,
-          privyUserId: testUserId,
-          email: "test@example.com",
+          farcasterFid: 999999,
+          username: "test_user",
           displayName: "Test User",
         };
       }

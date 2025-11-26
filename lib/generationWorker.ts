@@ -615,7 +615,7 @@ async function executeInitialGenerationJob(
       throw new Error(`User ${job.userId} not found`);
     }
 
-    logger.log(`🔧 Processing job for user: ${user.email || user.id}`);
+    logger.log(`🔧 Processing job for user: ${user.displayName || user.username || user.id}`);
     logger.log(`📋 Prompt: ${prompt.substring(0, 100)}...`);
     logger.log(`💬 Conversation History in context: ${context.conversationHistory?.length || 0} messages`);
 
@@ -1247,7 +1247,7 @@ async function executeFollowUpJob(
     throw new Error(`User ${job.userId} not found`);
   }
 
-  logger.log(`🔧 Processing follow-up job for user: ${user.email || user.id}`);
+  logger.log(`🔧 Processing follow-up job for user: ${user.displayName || user.username || user.id}`);
   logger.log(`📋 Prompt: ${prompt.substring(0, 100)}...`);
   logger.log(`📁 Project ID: ${projectId}`);
 

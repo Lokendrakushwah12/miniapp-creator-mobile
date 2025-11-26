@@ -1,30 +1,50 @@
+import { logger } from "../../../lib/logger";
 import { NextRequest, NextResponse } from "next/server";
+import { authenticateFarcasterUser } from "../../../lib/auth";
 
 export async function POST(request: NextRequest) {
   try {
-    const { password } = await request.json();
+    const { farcasterFid, username, displayName, pfpUrl } = await request.json();
 
-    // Get password from server-side environment variable (no NEXT_PUBLIC_ prefix)
-    const correctPassword = process.env.MINIDEV_PASSWORD || "minidev2024";
+    console.log('📨 [API /auth] Received auth request:', {
+      farcasterFid,
+      username,
+      displayName,
+      pfpUrl
+    });
 
-    if (password === correctPassword) {
-      // Generate a session token (in a real app, you'd use JWT or similar)
-      const sessionToken = crypto.randomUUID();
-
-      return NextResponse.json({
-        success: true,
-        message: "Authentication successful",
-        sessionToken,
-      });
-    } else {
+    if (!farcasterFid) {
       return NextResponse.json(
-        { success: false, message: "Invalid password" },
-        { status: 401 }
+        { success: false, message: "Farcaster FID is required" },
+        { status: 400 }
       );
     }
-  } catch {
+
+    const result = await authenticateFarcasterUser(farcasterFid, username, displayName, pfpUrl);
+    
+    if (!result.success) {
+      console.log('❌ [API /auth] Auth failed:', result.error);
+      return NextResponse.json(
+        { success: false, message: result.error },
+        { status: 500 }
+      );
+    }
+    
+    console.log('📤 [API /auth] Auth result:', {
+      success: result.success,
+      user: {
+        id: result.user.id,
+        displayName: result.user.displayName,
+        pfpUrl: result.user.pfpUrl,
+        username: result.user.username
+      }
+    });
+
+    return NextResponse.json(result);
+  } catch (error) {
+    logger.error("Auth error:", error);
     return NextResponse.json(
-      { success: false, message: "Internal server error" },
+      { success: false, message: "Authentication failed" },
       { status: 500 }
     );
   }

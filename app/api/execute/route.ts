@@ -30,7 +30,7 @@ export async function POST(req: NextRequest) {
     }
 
     const user = authResult.user;
-    logger.log('✅ User authenticated:', user.privyUserId);
+    logger.log('✅ User authenticated:', user.farcasterFid);
 
     // 2. Parse request body
     let requestBody;
