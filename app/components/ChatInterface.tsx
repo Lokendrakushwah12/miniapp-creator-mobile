@@ -365,6 +365,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 // For editing phase, directly apply changes without streaming conversation
                 logger.log('🔄 Directly applying changes to existing project...');
 
+                // Set generating state to trigger preview mode switch on mobile
+                setIsGenerating(true);
+
                 try {
                     // User message already saved at line 344-363, no need to save again
 
@@ -575,8 +578,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                         }
                     }
                 } finally {
-                    // IMPORTANT: Reset aiLoading before early return
+                    // IMPORTANT: Reset loading states before early return
                     setAiLoading(false);
+                    setIsGenerating(false); // Reset generating state to hide loading UI
                     setPrompt('');
                     // Clear the sending flag
                     isSendingMessageRef.current = false;
