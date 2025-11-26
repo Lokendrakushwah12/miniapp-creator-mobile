@@ -881,10 +881,24 @@ export async function POST(request: NextRequest) {
       throw new Error(enhancedResult.error || "Enhanced pipeline failed");
     }
 
-    const generatedFiles = enhancedResult.files.map(f => ({
+    let generatedFiles = enhancedResult.files.map(f => ({
       filename: f.filename,
       content: f.content
     }));
+
+    // Generate project name for metadata injection
+    const projectName = enhancedResult.intentSpec 
+      ? generateProjectName(enhancedResult.intentSpec)
+      : `Project ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
+    
+    // Inject dynamic metadata into layout.tsx files
+    const { processFilesWithMetadata } = await import('../../../lib/metadataInjector');
+    generatedFiles = processFilesWithMetadata(
+      generatedFiles,
+      projectName,
+      `A Farcaster miniapp: ${prompt.substring(0, 150)}...`,
+      undefined // baseUrl will be set after deployment
+    );
 
     // Check if the pipeline returned boilerplate files as-is (no changes needed)
     let pipelineResult: { needsChanges: boolean; reason?: string } = {
@@ -1001,26 +1015,41 @@ export async function POST(request: NextRequest) {
     try {
       logger.log("💾 Saving project to database...");
       
-      // Generate meaningful project name based on LLM-generated intent
-      const projectName = enhancedResult.intentSpec 
+      // Use the project name that was already generated for metadata
+      // (it was generated earlier for metadata injection)
+      const finalProjectName = enhancedResult.intentSpec 
         ? generateProjectName(enhancedResult.intentSpec)
         : `Project ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
       
       const project = await createProject(
         user.id, // Use actual user ID from authentication
-        projectName,
+        finalProjectName,
         `AI-generated project: ${userRequest.substring(0, 100)}...`,
         projectUrl,
         projectId, // Pass the custom project ID
         appType // Pass appType from request
       );
       
-      // Save ALL project files to database (boilerplate + generated)
-      const allFiles = await readAllFiles(userDir);
-      logger.log(`📁 Found ${allFiles.length} files to save to database`);
+      // Update metadata with actual project URL before saving
+      const { processFilesWithMetadata } = await import('../../../lib/metadataInjector');
+      const allFilesFromDisk = await readAllFiles(userDir);
+      
+      // Update metadata in layout.tsx with actual project URL
+      const filesWithUpdatedMetadata = processFilesWithMetadata(
+        allFilesFromDisk,
+        finalProjectName,
+        `AI-generated project: ${userRequest.substring(0, 100)}...`,
+        projectUrl
+      );
+      
+      // Write updated files back to disk
+      await writeFilesToDir(userDir, filesWithUpdatedMetadata);
+      
+      // Save ALL project files to database (boilerplate + generated with updated metadata)
+      logger.log(`📁 Found ${filesWithUpdatedMetadata.length} files to save to database`);
       
       // Filter out any files that might cause encoding issues
-      const safeFiles = allFiles.filter(file => {
+      const safeFiles = filesWithUpdatedMetadata.filter(file => {
         // Check for potential encoding issues
         if (file.content.includes('\0') || file.content.includes('\x00')) {
           logger.log(`⚠️ Skipping file with null bytes: ${file.filename}`);
