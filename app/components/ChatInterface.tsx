@@ -32,6 +32,7 @@ interface ChatMessage {
     changedFiles?: string[];
     timestamp?: number;
     phase?: 'requirements' | 'building' | 'editing';
+    generationTime?: number; // Time taken in seconds
 }
 
 interface ChatInterfaceProps {
@@ -88,6 +89,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
     
     // Flag to prevent chat state overwrites during message sending
     const isSendingMessageRef = useRef(false);
+    
+    // Track generation start time
+    const generationStartTimeRef = useRef<number | null>(null);
 
     // Chat session state - persist chatSessionId in sessionStorage to survive re-mounts
     const [chatSessionId] = useState<string>(() => {
@@ -181,12 +185,13 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                     if (response.ok) {
                         const data = await response.json();
                         if (data.messages && data.messages.length > 0) {
-                            const loadedMessages: ChatMessage[] = data.messages.map((msg: { role: string; content: string; phase?: string; timestamp: number; changedFiles?: string[] }) => ({
+                            const loadedMessages: ChatMessage[] = data.messages.map((msg: { role: string; content: string; phase?: string; timestamp: number; changedFiles?: string[]; generationTime?: number }) => ({
                                 role: msg.role,
                                 content: msg.content,
                                 phase: msg.phase,
                                 timestamp: msg.timestamp,
-                                changedFiles: msg.changedFiles
+                                changedFiles: msg.changedFiles,
+                                generationTime: msg.generationTime
                             }));
                             setChat(loadedMessages);
                             return;
@@ -366,6 +371,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 logger.log('🔄 Directly applying changes to existing project...');
 
                 // Set generating state to trigger preview mode switch on mobile
+                generationStartTimeRef.current = Date.now();
                 setIsGenerating(true);
 
                 try {
@@ -435,6 +441,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
 
                         // Show success message with actual file count
                         const changedFiles = result.generatedFiles || [];
+                        const elapsedTime = generationStartTimeRef.current 
+                            ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                            : undefined;
                         const successContent = `Changes applied successfully! I've updated ${changedFiles.length} files. The preview should reflect your changes shortly.`;
                         
                         setChat(prev => {
@@ -442,9 +451,13 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                             if (newChat.length > 0 && newChat[newChat.length - 1].role === 'ai') {
                                 newChat[newChat.length - 1].content = successContent;
                                 newChat[newChat.length - 1].changedFiles = changedFiles;
+                                if (elapsedTime !== undefined) {
+                                    newChat[newChat.length - 1].generationTime = elapsedTime;
+                                }
                             }
                             return newChat;
                         });
+                        generationStartTimeRef.current = null;
 
                         // Credit capture is handled server-side to prevent double charging
                         // Invalidate balance query to refresh balance display
@@ -460,7 +473,8 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                                         role: 'ai',
                                         content: successContent,
                                         phase: 'editing',
-                                        changedFiles: changedFiles
+                                        changedFiles: changedFiles,
+                                        generationTime: elapsedTime
                                     })
                                 });
                                 logger.log('💾 AI success message saved to database');
@@ -487,6 +501,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                         }
 
                         // Prepare success message
+                        const elapsedTime = generationStartTimeRef.current 
+                            ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                            : undefined;
                         const successContent = `Changes applied successfully! I've updated ${updateData.changed?.length || 0} files. The preview should reflect your changes shortly.`;
                         
                         // Update the last AI message with success
@@ -495,9 +512,13 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                             if (newChat.length > 0 && newChat[newChat.length - 1].role === 'ai') {
                                 newChat[newChat.length - 1].content = successContent;
                                 newChat[newChat.length - 1].changedFiles = updateData.changed || [];
+                                if (elapsedTime !== undefined) {
+                                    newChat[newChat.length - 1].generationTime = elapsedTime;
+                                }
                             }
                             return newChat;
                         });
+                        generationStartTimeRef.current = null;
 
                         // Credit capture is handled server-side to prevent double charging
                         // Invalidate balance query to refresh balance display
@@ -513,7 +534,8 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                                         role: 'ai',
                                         content: successContent,
                                         phase: 'editing',
-                                        changedFiles: updateData.changed || []
+                                        changedFiles: updateData.changed || [],
+                                        generationTime: elapsedTime
                                     })
                                 });
                                 logger.log('💾 AI success message saved to database');
@@ -584,6 +606,10 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                     setPrompt('');
                     // Clear the sending flag
                     isSendingMessageRef.current = false;
+                    // Clear generation start time if not already cleared
+                    if (generationStartTimeRef.current) {
+                        generationStartTimeRef.current = null;
+                    }
                 }
 
                 return; // Skip the rest of the function since we handled the editing phase
@@ -855,6 +881,7 @@ Please build this project with all the features and requirements discussed above
         }
 
         logger.log('🚀 Starting project generation...');
+        generationStartTimeRef.current = Date.now();
         setIsGenerating(true);
 
         // setError(null);
@@ -937,6 +964,9 @@ Please build this project with all the features and requirements discussed above
                 logger.log('✅ Phase set to editing');
 
                 // Add generation success message to chat
+                const elapsedTime = generationStartTimeRef.current 
+                    ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                    : undefined;
                 const aiMessage = project.generatedFiles && project.generatedFiles.length > 0
                     ? `Your miniapp has been created! I've generated ${project.generatedFiles.length} files and your app is now running. You can preview it on the right and continue chatting with me to make changes.`
                     : 'Your miniapp has been created! The preview should be available shortly. You can continue chatting with me to make changes.';
@@ -946,10 +976,12 @@ Please build this project with all the features and requirements discussed above
                     content: aiMessage,
                     changedFiles: project.generatedFiles || [],
                     phase: 'editing',
-                    timestamp: Date.now()
+                    timestamp: Date.now(),
+                    generationTime: elapsedTime
                 };
 
                 setChat(prev => [...prev, successMsg]);
+                generationStartTimeRef.current = null;
 
                 // Save success message to database
                 if (project.projectId) {
@@ -961,7 +993,8 @@ Please build this project with all the features and requirements discussed above
                                 role: 'ai',
                                 content: aiMessage,
                                 phase: 'editing',
-                                changedFiles: project.generatedFiles || []
+                                changedFiles: project.generatedFiles || [],
+                                generationTime: elapsedTime
                             })
                         });
                     } catch (error) {
@@ -999,6 +1032,9 @@ Please build this project with all the features and requirements discussed above
             logger.log('✅ Phase set to editing');
 
             // Add generation success message to chat
+            const elapsedTime = generationStartTimeRef.current 
+                ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                : undefined;
             const aiMessage = project.generatedFiles && project.generatedFiles.length > 0
                 ? `Your miniapp has been created! I've generated ${project.generatedFiles.length} files and your app is now running. You can preview it on the right and continue chatting with me to make changes.`
                 : 'Your miniapp has been created! The preview should be available shortly. You can continue chatting with me to make changes.';
@@ -1008,10 +1044,12 @@ Please build this project with all the features and requirements discussed above
                 content: aiMessage,
                 changedFiles: project.generatedFiles || [],
                 phase: 'editing',
-                timestamp: Date.now()
+                timestamp: Date.now(),
+                generationTime: elapsedTime
             };
 
             setChat(prev => [...prev, successMsg]);
+            generationStartTimeRef.current = null;
 
             // Save success message to database
             if (project.projectId) {
@@ -1023,7 +1061,8 @@ Please build this project with all the features and requirements discussed above
                             role: 'ai',
                             content: aiMessage,
                             phase: 'editing',
-                            changedFiles: project.generatedFiles || []
+                            changedFiles: project.generatedFiles || [],
+                            generationTime: elapsedTime
                         })
                     });
                 } catch (error) {
@@ -1105,6 +1144,10 @@ Please build this project with all the features and requirements discussed above
             }
         } finally {
             setIsGenerating(false);
+            // Clear generation start time if not already cleared
+            if (generationStartTimeRef.current) {
+                generationStartTimeRef.current = null;
+            }
         }
     };
 
@@ -1227,31 +1270,45 @@ Please build this project with all the features and requirements discussed above
                                         Retry - Fix This Error
                                     </button>
                                 )}
-                                {msg.role === 'ai' && msg.changedFiles && msg.changedFiles.length > 0 && (
+                                {msg.role === 'ai' && ((msg.changedFiles && msg.changedFiles.length > 0) || msg.generationTime !== undefined) && (
                                     <div className="mt-3 pt-3 border-t border-gray-200">
-                                        <div className="flex items-center gap-2 mb-2">
-                                            <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-                                            </svg>
-                                            <span className="text-xs font-semibold text-green-600">
-                                                {msg.changedFiles.length} file{msg.changedFiles.length !== 1 ? 's' : ''} updated
-                                            </span>
-                                        </div>
-                                        <div className="text-xs text-gray-600 space-y-1">
-                                            {msg.changedFiles.slice(0, 3).map((file, i) => (
-                                                <div key={i} className="flex items-center gap-1">
-                                                    <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                        {msg.changedFiles && msg.changedFiles.length > 0 && (
+                                            <>
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    <svg className="w-4 h-4 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                                                     </svg>
-                                                    <span className="font-mono">{file}</span>
+                                                    <span className="text-xs font-semibold text-green-600">
+                                                        {msg.changedFiles.length} file{msg.changedFiles.length !== 1 ? 's' : ''} updated
+                                                    </span>
                                                 </div>
-                                            ))}
-                                            {msg.changedFiles.length > 3 && (
-                                                <div className="text-xs text-gray-400 ml-4">
-                                                    +{msg.changedFiles.length - 3} more file{msg.changedFiles.length - 3 !== 1 ? 's' : ''}
+                                                <div className="text-xs text-gray-600 space-y-1">
+                                                    {msg.changedFiles.slice(0, 3).map((file, i) => (
+                                                        <div key={i} className="flex items-center gap-1">
+                                                            <svg className="w-3 h-3 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                                                            </svg>
+                                                            <span className="font-mono">{file}</span>
+                                                        </div>
+                                                    ))}
+                                                    {msg.changedFiles.length > 3 && (
+                                                        <div className="text-xs text-gray-400 ml-4">
+                                                            +{msg.changedFiles.length - 3} more file{msg.changedFiles.length - 3 !== 1 ? 's' : ''}
+                                                        </div>
+                                                    )}
                                                 </div>
-                                            )}
-                                        </div>
+                                            </>
+                                        )}
+                                        {msg.generationTime !== undefined && (
+                                            <div className={`flex items-center gap-2 ${msg.changedFiles && msg.changedFiles.length > 0 ? 'mt-2' : ''}`}>
+                                                <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                </svg>
+                                                <span className="text-xs text-gray-500">
+                                                    Generated in {msg.generationTime < 60 ? `${msg.generationTime}s` : `${Math.floor(msg.generationTime / 60)}m ${msg.generationTime % 60}s`}
+                                                </span>
+                                            </div>
+                                        )}
                                     </div>
                                 )}
                             </div>
@@ -1290,7 +1347,7 @@ Please build this project with all the features and requirements discussed above
                             <div className="rounded-lg px-1 py-2 max-w-[80%]">
                                 <div className="flex items-center gap-1">
                                     <TextShimmer className="text-sm">
-                                        Thinking...
+                                        Thinking
                                     </TextShimmer>
                                 </div>
                             </div>

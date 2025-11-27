@@ -69,6 +69,9 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
 
   const handleProjectSelect = (project: Project) => {
     onProjectSelect(project);
+    if (isOpen) {
+      onToggle();
+    }
   };
 
   const handleNewProject = () => {

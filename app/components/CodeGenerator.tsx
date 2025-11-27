@@ -140,7 +140,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
                 {/* Copy Link Button */}
                 <button
                   onClick={handleCopyLink}
-                  className={`p-1.5 rounded-md transition-colors ${
+                  className={`p-1.5 rounded-full transition-colors ${
                     linkCopied 
                       ? 'bg-green-100 text-green-700' 
                       : 'text-gray-600 hover:text-black hover:bg-gray-200'
@@ -153,7 +153,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
                 {/* Open in New Tab Button */}
                 <button
                   onClick={handleOpenInNewTab}
-                  className="p-1.5 rounded-md transition-colors text-gray-600 hover:text-black hover:bg-gray-200"
+                  className="p-1.5 rounded-full transition-colors text-gray-600 hover:text-black hover:bg-gray-200"
                   title="Open in new tab"
                 >
                   <ExternalLinkIcon className="w-4 h-4" />
@@ -166,7 +166,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
           {currentProject && (
             <button
               onClick={() => setShowPublishModal(true)}
-              className="px-4 py-2 bg-black text-white hover:bg-gray-800 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+              className="px-4 py-2 bg-black text-white hover:bg-gray-800 rounded-full text-sm font-medium transition-colors flex items-center gap-2"
               title="Publish to Farcaster"
             >
               <span>Publish</span>
