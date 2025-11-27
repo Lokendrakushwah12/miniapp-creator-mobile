@@ -92,13 +92,11 @@ export async function sendNotification(
       return false;
     }
 
-    // The frame URL that users added (where your farcaster.json manifest is hosted)
-    const frameUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://miniapp.minidev.fun';
-    
     logger.log(`📤 Attempting to send notification via Neynar:`, {
       targetFid: user.farcasterFid,
-      frameUrl,
       title,
+      body,
+      targetUrl: notificationPayload.targetUrl,
     });
 
     try {
@@ -112,12 +110,14 @@ export async function sendNotification(
           'x-api-key': neynarApiKey,
         },
         body: JSON.stringify({
-          // The frame URL identifies which frame/app is sending the notification
-          frame_url: frameUrl,
+          // Target users by FID
           target_fids: [user.farcasterFid],
-          title,
-          body,
-          target_url: notificationPayload.targetUrl,
+          // Notification content must be wrapped in a 'notification' object
+          notification: {
+            title,
+            body,
+            target_url: notificationPayload.targetUrl,
+          },
         }),
       });
 
@@ -157,10 +157,9 @@ export async function sendNotification(
         if (responseData?.message?.includes('no notification tokens') || 
             responseData?.message?.includes('No notification tokens')) {
           logger.warn(`⚠️ User ${user.farcasterFid} hasn't enabled notifications for this mini app`);
-          logger.warn(`Make sure user has added the mini app at ${frameUrl} and enabled notifications`);
         }
         if (responseData?.message?.includes('invalid') || responseData?.code === 'invalid_request') {
-          logger.error(`❌ Invalid request - check frame_url and API key`);
+          logger.error(`❌ Invalid request - check API key and request format`);
         }
       }
     } catch (neynarError) {
