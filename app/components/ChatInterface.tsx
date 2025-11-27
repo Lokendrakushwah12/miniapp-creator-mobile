@@ -24,6 +24,7 @@ interface GeneratedProject {
     hasPackageChanges?: boolean;
     lastUpdated?: number; // Timestamp to trigger iframe refresh after edits
     appType?: 'farcaster';
+    stuckOnError?: boolean; // True if the model got stuck on the same error after multiple retries
 }
 
 interface ChatMessage {
@@ -477,6 +478,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                                     ...currentProject,
                                     generatedFiles: result.generatedFiles || currentProject.generatedFiles,
                                     lastUpdated: Date.now(),
+                                    stuckOnError: result.stuckOnError,
                                 };
                                 logger.log('🔄 Updating project with saved files despite deployment failure');
                                 onProjectGenerated(updatedProject);
@@ -488,11 +490,25 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                                 ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
                                 : undefined;
                             
-                            let errorContent = `❌ **Deployment Failed**\n\n`;
-                            errorContent += `Your changes have been saved (${changedFiles.length} files), but deployment to Vercel failed:\n\n`;
-                            errorContent += `\`\`\`\n${result.deploymentError?.substring(0, 800) || 'Unknown error'}\n\`\`\`\n\n`;
-                            errorContent += `**Your files are saved** - you can view and edit them in the Code tab.\n`;
-                            errorContent += `Try asking me to "fix the error" or describe what went wrong.`;
+                            let errorContent = '';
+                            
+                            // Check if we're stuck on the same error
+                            if (result.stuckOnError) {
+                                errorContent = `🔄 **Stuck on Error**\n\n`;
+                                errorContent += `I've tried to fix this error multiple times but haven't been able to resolve it. `;
+                                errorContent += `This sometimes happens with particularly tricky issues.\n\n`;
+                                errorContent += `**What you can do:**\n`;
+                                errorContent += `• Try building your app again with a fresh start - click "New App" and describe what you want\n`;
+                                errorContent += `• Try rephrasing your request with more specific details\n`;
+                                errorContent += `• You can also manually edit the code in the Code tab\n\n`;
+                                errorContent += `**Your files are saved** - you can view them in the Code tab if needed.`;
+                            } else {
+                                errorContent = `❌ **Deployment Failed**\n\n`;
+                                errorContent += `Your changes have been saved (${changedFiles.length} files), but deployment to Vercel failed:\n\n`;
+                                errorContent += `\`\`\`\n${result.deploymentError?.substring(0, 800) || 'Unknown error'}\n\`\`\`\n\n`;
+                                errorContent += `**Your files are saved** - you can view and edit them in the Code tab.\n`;
+                                errorContent += `Try asking me to "fix the error" or describe what went wrong.`;
+                            }
                             
                             setChat(prev => {
                                 const newChat = [...prev];
@@ -887,7 +903,7 @@ Please build this project with all the features and requirements discussed above
 
     // Polling function for async job status
     // Returns GeneratedProject with optional deploymentFailed flag
-    const pollJobStatus = async (jobId: string): Promise<GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string }> => {
+    const pollJobStatus = async (jobId: string): Promise<GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string; stuckOnError?: boolean }> => {
         const maxAttempts = 80; // Poll for up to ~20 minutes (80 * 15 seconds)
         let attempt = 0;
 
@@ -953,11 +969,18 @@ Please build this project with all the features and requirements discussed above
                         // Check if the project was created (files saved) even though deployment failed
                         // This allows users to view and edit the files even when deployment fails
                         const projectId = job.result?.projectId || job.projectId;
+                        
+                        // Check if the model got stuck on the same error
+                        const isStuckOnError = job.result?.stuckOnError || job.result?.status === 'stuck_on_error';
+                        if (isStuckOnError) {
+                            logger.log('🚫 Model is stuck on the same error - will prompt user to start fresh');
+                        }
+                        
                         if (projectId) {
                             logger.log('📦 Project files were saved despite deployment failure, returning partial project data');
                             
                             // Return partial project data so the UI can display the files
-                            const partialProject: GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string } = {
+                            const partialProject: GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string; stuckOnError?: boolean } = {
                                 projectId: projectId,
                                 port: job.result?.port || 3000,
                                 url: job.result?.previewUrl || job.result?.url || '',
@@ -968,6 +991,7 @@ Please build this project with all the features and requirements discussed above
                                 isNewDeployment: true,
                                 deploymentFailed: true,
                                 deploymentError: errorMessage,
+                                stuckOnError: isStuckOnError,
                             };
                             
                             resolve(partialProject);
@@ -1085,6 +1109,7 @@ Please build this project with all the features and requirements discussed above
                     logger.log('📦 Project files saved despite deployment failure:', {
                         projectId: project.projectId,
                         filesCount: project.generatedFiles?.length || 0,
+                        stuckOnError: project.stuckOnError,
                     });
                     
                     // Still update the project state so files can be viewed
@@ -1097,11 +1122,25 @@ Please build this project with all the features and requirements discussed above
                         ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
                         : undefined;
                     
-                    let errorContent = `❌ **Deployment Failed**\n\n`;
-                    errorContent += `Your miniapp files have been generated (${project.generatedFiles?.length || 0} files), but deployment to Vercel failed:\n\n`;
-                    errorContent += `\`\`\`\n${project.deploymentError?.substring(0, 800) || 'Unknown error'}\n\`\`\`\n\n`;
-                    errorContent += `**Good news:** Your files are saved! You can view and edit them in the Code tab.\n`;
-                    errorContent += `Ask me to "fix the deployment error" and I'll try to resolve the issue.`;
+                    let errorContent = '';
+                    
+                    // Check if we're stuck on the same error
+                    if (project.stuckOnError) {
+                        errorContent = `🔄 **Stuck on Error**\n\n`;
+                        errorContent += `I've tried to fix this error multiple times but haven't been able to resolve it. `;
+                        errorContent += `This sometimes happens with particularly tricky issues.\n\n`;
+                        errorContent += `**What you can do:**\n`;
+                        errorContent += `• Try building your app again with a fresh start - click "New App" and describe what you want differently\n`;
+                        errorContent += `• Try simplifying your request or breaking it into smaller steps\n`;
+                        errorContent += `• You can also manually edit the code in the Code tab\n\n`;
+                        errorContent += `**Your files are saved** - you can view them in the Code tab if needed.`;
+                    } else {
+                        errorContent = `❌ **Deployment Failed**\n\n`;
+                        errorContent += `Your miniapp files have been generated (${project.generatedFiles?.length || 0} files), but deployment to Vercel failed:\n\n`;
+                        errorContent += `\`\`\`\n${project.deploymentError?.substring(0, 800) || 'Unknown error'}\n\`\`\`\n\n`;
+                        errorContent += `**Good news:** Your files are saved! You can view and edit them in the Code tab.\n`;
+                        errorContent += `Ask me to "fix the deployment error" and I'll try to resolve the issue.`;
+                    }
                     
                     const errorMsg: ChatMessage = {
                         role: 'ai',

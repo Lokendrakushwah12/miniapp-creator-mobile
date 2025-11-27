@@ -246,6 +246,7 @@ const FARCASTER_BOILERPLATE_CONTEXT = {
     dependencyManagement: "🔧 If you use external libraries not in package.json, ADD them to dependencies with proper versions (e.g. 'recharts': '^2.12.0')",
     wagmiConfig: "For Web3 apps: Modify wagmi.ts to import CHAIN from contractConfig. For non-Web3 apps: Do not modify wagmi.ts",
     noMultiWallet: "🚨 FORBIDDEN: DO NOT import or use @rainbow-me/rainbowkit, MetaMask, WalletConnect, or any multi-wallet providers. Farcaster apps use ONLY farcasterMiniApp connector.",
+    noConnectWalletUI: "🚫 NO CONNECT WALLET BUTTONS: Farcaster miniapps get wallet connection automatically via SDK - NEVER show ConnectWallet component or any wallet connection UI",
   },
   keyComponents: {
     useUser: {
@@ -508,11 +509,12 @@ ${appType === 'farcaster' ? `
 - 🚨 CRITICAL: Wallet connection ONLY via farcasterMiniApp() - NO MetaMask, NO RainbowKit, NO other wallets
 - 🚨 CRITICAL: ALWAYS use useUser hook from @/hooks for user data (username, fid, displayName, pfpUrl)
 - 🚨 FORBIDDEN: DO NOT import or use RainbowKit, MetaMask, WalletConnect, or any multi-wallet libraries
+- 🚫 NO CONNECT WALLET BUTTONS: Farcaster SDK handles wallet connection automatically - NEVER show ConnectWallet UI
 - Tab-based single page application
-- Mobile-first UI components (Button, Input, ConnectWallet, Tabs)
+- Mobile-first UI components (Button, Input, Tabs) - NO ConnectWallet component in Farcaster apps!
 - Automatic environment detection (Mini App vs Browser)
 - Pre-configured API endpoint for Farcaster authentication (/api/me)
-- ConnectWallet component uses ONLY wagmi's useConnect hook with farcasterMiniApp connector
+- For blockchain features: wallet is auto-connected via Farcaster SDK, just use wagmi hooks directly
 ` : `
 - 🚨 CRITICAL: NO Farcaster SDK - this is a Web3 Web App!
 - Multi-wallet support: MetaMask, Coinbase Wallet (via RainbowKit)
@@ -522,6 +524,7 @@ ${appType === 'farcaster' ? `
 - Tab-based single page application
 - Responsive UI components (Button, Input, ConnectWallet with RainbowKit, Tabs)
 - Wagmi hooks: useAccount, useBalance, useReadContract, useWriteContract
+- ConnectWallet button required for users to connect their wallets
 `}
 - Do not modify package.json unless absolutely necessary
 
@@ -799,7 +802,8 @@ ${JSON.stringify(context, null, 2)}
 - DO NOT create wrapper API routes for contract interactions (e.g., src/app/api/contract/read/route.ts)
 - ONLY modify src/app/page.tsx and create components in src/components/
 - For Web3: ONLY modify contracts/src/ for smart contracts and contracts/scripts/deploy.js
-- Use existing boilerplate patterns: Tabs component, Button, Input, ConnectWallet
+- Use existing boilerplate patterns: Tabs component, Button, Input${appType === 'web3' ? ', ConnectWallet' : ''}
+${appType === 'farcaster' ? '- 🚫 NO CONNECT WALLET BUTTONS: Farcaster SDK handles wallet connection automatically' : ''}
 - NEVER deviate from boilerplate structure to avoid TypeScript errors
 
 CRITICAL: Return ONLY valid JSON. Surround the JSON with EXACT markers:
@@ -1174,6 +1178,14 @@ ${useUserExample}
 - Prefer neutral colors with subtle accents, ensure good contrast and accessibility
 - For Web3 apps: Modify wagmi.ts to import CHAIN from contractConfig. For non-Web3 apps: Do not modify wagmi.ts
 - 🔧 DEPENDENCY MANAGEMENT: If you use external libraries NOT already in package.json, you MUST add them to the dependencies object with appropriate semantic versions (e.g., "recharts": "^2.12.0")
+
+🚨 CRITICAL - UPDATE GENERIC TITLES/HEADINGS:
+- The boilerplate contains generic placeholder titles like "Farcaster Miniapp" or "Web3 App" in h1/h2 tags
+- YOU MUST replace these generic titles with the ACTUAL APP NAME based on the user's intent
+- Look for hardcoded text like "Farcaster Miniapp", "My App", "Web3 App" in page.tsx and update them
+- The app title should reflect what the user is building (e.g., "Music Player", "Todo List", "NFT Gallery")
+- Also update any generic subtitles or descriptions to match the app's purpose
+- Check src/app/page.tsx and any other files with generic placeholder text
 `;
 }
 
@@ -1188,7 +1200,7 @@ Required in ALL files with: React hooks, event handlers, or interactive JSX
 
 function getWeb3AuthRules(): string {
   return `
-=== WEB3 AUTHENTICATION (Wallet Only - NO FARCASTER) ===
+=== WEB3 WEB APP AUTHENTICATION (Wallet Only - NO FARCASTER) ===
 🚨 CRITICAL: This is a Web3 Web App - NOT a Farcaster Mini App!
 
 - Import ConnectWallet: import { ConnectWallet } from '@/components/wallet/ConnectWallet';
@@ -1196,7 +1208,7 @@ function getWeb3AuthRules(): string {
 - Show loading state: if (isConnecting) return <div>Connecting wallet...</div>;
 - ❌ DO NOT use: isMiniApp, username, fid, displayName, isLoading - these don't exist!
 
-CORRECT PATTERN FOR WEB3:
+CORRECT PATTERN FOR WEB3 WEB APP:
 {isConnected && address ? (
   <main><!-- Full app functionality with wallet --></main>
 ) : (
@@ -1206,15 +1218,103 @@ CORRECT PATTERN FOR WEB3:
 ❌ WRONG - Don't use Farcaster properties:
 {isMiniApp || address ? ... } // isMiniApp doesn't exist in Web3!
 
-REASONING: Web3 apps require wallet connection for blockchain interactions
+REASONING: Web3 web apps require explicit wallet connection via RainbowKit/MetaMask
+`;
+}
+
+function getFarcasterWeb3AuthRules(): string {
+  return `
+=== FARCASTER MINIAPP WITH BLOCKCHAIN FEATURES ===
+🚨 CRITICAL: This is a FARCASTER Mini App with Web3/blockchain features!
+
+🚫 FORBIDDEN - NO CONNECT WALLET BUTTONS IN FARCASTER APPS:
+- ❌ DO NOT import ConnectWallet component
+- ❌ DO NOT show any "Connect Wallet" buttons or UI  
+- ❌ DO NOT use RainbowKit or manual wallet connection flows
+- ❌ DO NOT use wagmi's useConnect() to show connector buttons
+
+✅ CORRECT APPROACH - USE FARCASTER SDK's WALLET PROVIDER:
+The Farcaster SDK provides wallet access through sdk.wallet.ethProvider. Use this pattern:
+
+import { sdk } from '@farcaster/miniapp-sdk';
+
+// Function to get/connect wallet in Farcaster miniapp
+async function connectWalletInFarcaster(): Promise<string | null> {
+  try {
+    // Check if wallet is already connected
+    let accounts = await sdk.wallet.ethProvider.request({
+      method: 'eth_accounts',
+    });
+    
+    // If not connected, request connection (prompts user in Farcaster client)
+    if (!accounts || accounts.length === 0) {
+      accounts = await sdk.wallet.ethProvider.request({
+        method: 'eth_requestAccounts',
+      });
+    }
+    
+    return accounts?.[0] || null;
+  } catch (error) {
+    console.error('Wallet connection failed:', error);
+    return null;
+  }
+}
+
+✅ USING WITH WAGMI FOR CONTRACT INTERACTIONS:
+- The farcasterMiniApp() connector in wagmi.ts bridges Farcaster SDK to wagmi
+- wagmi hooks (useReadContract, useWriteContract) work automatically
+- useAccount() from wagmi provides the connected address
+- For blockchain interactions, wagmi handles everything via the connector
+
+CORRECT PATTERN FOR FARCASTER MINIAPP WITH WEB3:
+import { useUser } from '@/hooks';
+import { useAccount, useWriteContract } from 'wagmi';
+import { sdk } from '@farcaster/miniapp-sdk';
+import { useEffect, useState } from 'react';
+
+function MyComponent() {
+  const { isMiniApp, username, isLoading } = useUser();
+  const { address, isConnected } = useAccount();
+  const [walletReady, setWalletReady] = useState(false);
+  
+  // Auto-connect wallet when in Farcaster miniapp
+  useEffect(() => {
+    if (isMiniApp && !isConnected) {
+      sdk.wallet.ethProvider.request({ method: 'eth_requestAccounts' })
+        .then(() => setWalletReady(true))
+        .catch(console.error);
+    } else if (isConnected) {
+      setWalletReady(true);
+    }
+  }, [isMiniApp, isConnected]);
+
+  if (isLoading) return <div>Loading...</div>;
+
+  return (
+    <main>
+      <p>Welcome @{username}</p>
+      {address && <p>Wallet: {address.slice(0,6)}...{address.slice(-4)}</p>}
+      {/* Use wagmi hooks for contract interactions */}
+    </main>
+  );
+}
+
+🚨 WHY NO CONNECT WALLET BUTTON IN FARCASTER?
+- Farcaster miniapps run inside Warpcast/Farcaster client
+- User's wallet is accessible via sdk.wallet.ethProvider
+- Call eth_requestAccounts programmatically to prompt wallet access
+- The farcasterMiniApp wagmi connector bridges this to wagmi hooks
+- Adding a ConnectWallet UI button is unnecessary and confusing
+
+REASONING: Farcaster SDK provides programmatic wallet access - connect via eth_requestAccounts, not UI buttons
 `;
 }
 
 function getNonWeb3AuthRules(): string {
   return `
-=== NON-WEB3 AUTHENTICATION (Farcaster + Browser) ===
-- DO NOT import ConnectWallet (not needed - no blockchain)
-- DO NOT import wagmi hooks (useAccount, useConnect, etc.)
+=== FARCASTER MINIAPP (NO BLOCKCHAIN) ===
+- ❌ DO NOT import ConnectWallet (not needed - no blockchain features)
+- ❌ DO NOT import wagmi hooks (useAccount, useConnect, etc.)
 - Use useUser: const { isMiniApp, username, isLoading } = useUser();
 - Show loading state: if (isLoading) return <div>Loading...</div>;
 
@@ -1222,7 +1322,7 @@ function getNonWeb3AuthRules(): string {
 Farcaster mode: Authenticated via Farcaster (isMiniApp === true)
 Browser mode: Works directly, no wallet needed (localStorage-based)
 
-CORRECT PATTERN FOR BROWSER:
+CORRECT PATTERN FOR FARCASTER MINIAPP (NO WEB3):
 Option 1 - Anonymous mode (best for most apps):
 {isMiniApp ? (
   <main><!-- Show with Farcaster username --></main>
@@ -1247,7 +1347,7 @@ const [guestName, setGuestName] = useLocalStorage('userName', '');
   <main>Welcome {guestName}</main>
 )}
 
-REASONING: Non-web3 apps work in browser without wallet (localStorage for data)
+REASONING: Non-web3 Farcaster apps work in browser without wallet (localStorage for data)
 `;
 }
 
@@ -1616,10 +1716,19 @@ ${'='.repeat(80)}
     ? getWeb3Rules()
     : '';
 
-  // Choose auth rules based on web3 requirement
-  const authRules = intentSpec.isWeb3
-    ? getWeb3AuthRules()
-    : getNonWeb3AuthRules();
+  // Choose auth rules based on BOTH appType and web3 requirement
+  // - Farcaster apps: NEVER show ConnectWallet (SDK handles wallet automatically)
+  // - Web3 web apps: Show ConnectWallet (RainbowKit/MetaMask)
+  let authRules: string;
+  if (appType === 'farcaster') {
+    // Farcaster miniapps - SDK handles wallet connection automatically
+    authRules = intentSpec.isWeb3 
+      ? getFarcasterWeb3AuthRules()  // Farcaster + blockchain (no ConnectWallet)
+      : getNonWeb3AuthRules();        // Farcaster without blockchain
+  } else {
+    // Web3 web apps - need explicit wallet connection
+    authRules = getWeb3AuthRules();   // Web3 web app (with ConnectWallet)
+  }
 
   if (isInitialGeneration) {
     return `${web3Warning}

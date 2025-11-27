@@ -68,10 +68,10 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
   }, [sessionToken]);
 
   const handleProjectSelect = (project: Project) => {
+    // Close sidebar first for immediate feedback
+    onToggle();
+    // Then load the project
     onProjectSelect(project);
-    if (isOpen) {
-      onToggle();
-    }
   };
 
   const handleNewProject = () => {

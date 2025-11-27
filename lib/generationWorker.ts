@@ -45,6 +45,56 @@ import { logger } from "./logger";
 
 const CUSTOM_DOMAIN_BASE = process.env.CUSTOM_DOMAIN_BASE || 'minidev.fun';
 
+// Maximum consecutive retries with the same error before giving up
+const MAX_CONSECUTIVE_SAME_ERROR_RETRIES = 3;
+
+/**
+ * Create a normalized error signature for comparison.
+ * This helps detect when the same error keeps occurring across retries.
+ */
+function createErrorSignature(error: string): string {
+  // Normalize the error by:
+  // 1. Converting to lowercase
+  // 2. Removing line numbers (which may vary)
+  // 3. Removing file paths (keeping just the filename)
+  // 4. Removing whitespace variations
+  // 5. Taking the first significant error message
+  
+  const normalized = error
+    .toLowerCase()
+    .replace(/\d+:\d+/g, 'LINE:COL') // Normalize line:col references
+    .replace(/line \d+/gi, 'line N') // Normalize "line X" references
+    .replace(/at line \d+/gi, 'at line N')
+    .replace(/\(\d+:\d+\)/g, '(LINE:COL)') // Normalize (line:col)
+    .replace(/\/[^\s:]+\//g, '/PATH/') // Normalize directory paths
+    .replace(/\s+/g, ' ') // Normalize whitespace
+    .trim();
+  
+  // Extract the first meaningful error message (usually the most important)
+  const firstError = normalized.split('\n')[0] || normalized;
+  
+  // Create a hash-like signature from the first 200 chars
+  return firstError.substring(0, 200);
+}
+
+/**
+ * Check if errors are similar by comparing their signatures
+ */
+function areErrorsSimilar(error1: string, error2: string): boolean {
+  const sig1 = createErrorSignature(error1);
+  const sig2 = createErrorSignature(error2);
+  
+  // Consider errors similar if signatures match or have high overlap
+  if (sig1 === sig2) return true;
+  
+  // Also check for substring match (one error might be more detailed)
+  if (sig1.includes(sig2.substring(0, 100)) || sig2.includes(sig1.substring(0, 100))) {
+    return true;
+  }
+  
+  return false;
+}
+
 // Utility: Recursively read all files in a directory
 async function readAllFiles(
   dir: string,
@@ -888,8 +938,13 @@ async function executeInitialGenerationJob(
     logger.log("🚀 Creating preview...");
     let previewData: Awaited<ReturnType<typeof createPreview>> | undefined;
     let projectUrl: string = `https://${projectId}.${CUSTOM_DOMAIN_BASE}`; // Default fallback URL (custom domain)
-    const maxDeploymentRetries = 2; // Allow 1 retry with fixes
+    const maxDeploymentRetries = 4; // Allow up to 3 retries with fixes (to detect 3 consecutive same errors)
     let deploymentAttempt = 0;
+    
+    // Track consecutive errors to detect when we're stuck on the same error
+    const errorHistory: string[] = [];
+    let consecutiveSameErrorCount = 0;
+    let stuckOnError = false;
 
     while (deploymentAttempt < maxDeploymentRetries) {
       deploymentAttempt++;
@@ -897,6 +952,8 @@ async function executeInitialGenerationJob(
       logger.log(`🔍 [RETRY-DEBUG] Starting deployment attempt ${deploymentAttempt}`);
       logger.log(`🔍 [RETRY-DEBUG] maxDeploymentRetries: ${maxDeploymentRetries}`);
       logger.log(`🔍 [RETRY-DEBUG] Files count: ${generatedFiles.length}`);
+      logger.log(`🔍 [RETRY-DEBUG] Error history count: ${errorHistory.length}`);
+      logger.log(`🔍 [RETRY-DEBUG] Consecutive same error count: ${consecutiveSameErrorCount}`);
 
       try {
         // Skip contract deployment in /deploy endpoint if we already deployed them
@@ -938,11 +995,55 @@ async function executeInitialGenerationJob(
           logger.log(`🔍 [RETRY-DEBUG] Deployment failed, checking if retry is possible...`);
           logger.log(`🔍 [RETRY-DEBUG] deploymentAttempt < maxDeploymentRetries: ${deploymentAttempt < maxDeploymentRetries}`);
           
+          // Track consecutive same errors
+          const currentErrorSignature = createErrorSignature(previewData.deploymentError);
+          if (errorHistory.length > 0) {
+            const lastError = errorHistory[errorHistory.length - 1];
+            if (areErrorsSimilar(previewData.deploymentError, lastError)) {
+              consecutiveSameErrorCount++;
+              logger.log(`🔄 [STUCK-CHECK] Same error detected! Consecutive count: ${consecutiveSameErrorCount}`);
+            } else {
+              consecutiveSameErrorCount = 1; // Reset counter for new error
+              logger.log(`🔄 [STUCK-CHECK] Different error detected, resetting counter`);
+            }
+          } else {
+            consecutiveSameErrorCount = 1;
+          }
+          errorHistory.push(previewData.deploymentError);
+          logger.log(`🔍 [STUCK-CHECK] Error signature: ${currentErrorSignature.substring(0, 100)}...`);
+          
+          // Check if we're stuck on the same error
+          if (consecutiveSameErrorCount >= MAX_CONSECUTIVE_SAME_ERROR_RETRIES) {
+            logger.error(`🚫 [STUCK-CHECK] Stuck on same error after ${consecutiveSameErrorCount} consecutive retries!`);
+            stuckOnError = true;
+            
+            // Mark job as failed with stuck_on_error status
+            const errorDetails = {
+              status: 'stuck_on_error',
+              stuckOnError: true,
+              consecutiveRetries: consecutiveSameErrorCount,
+              attempts: deploymentAttempt,
+              deploymentError: previewData.deploymentError,
+              deploymentLogs: previewData.deploymentLogs ? previewData.deploymentLogs.substring(0, 1000) : undefined,
+              projectId: projectId,
+              generatedFiles: generatedFiles.map(f => f.filename),
+              url: `https://${projectId}.${CUSTOM_DOMAIN_BASE}`,
+              port: 3000,
+            };
+            
+            await updateGenerationJobStatus(jobId, 'failed', errorDetails, 
+              `Stuck on same error after ${consecutiveSameErrorCount} consecutive retries. Please try building the app again with a fresh start.`);
+            
+            previewData = undefined;
+            break; // Exit the retry loop
+          }
+          
           // Log to database for visibility
           await updateGenerationJobStatus(jobId, 'processing', {
             status: 'deployment_retry',
             attempt: deploymentAttempt,
             maxAttempts: maxDeploymentRetries,
+            consecutiveSameErrorCount,
             error: previewData.deploymentError.substring(0, 500), // Truncate for DB
             hasLogs: !!previewData.deploymentLogs
           });
@@ -982,6 +1083,7 @@ async function executeInitialGenerationJob(
               status: 'deployment_retrying',
               attempt: deploymentAttempt + 1,
               maxAttempts: maxDeploymentRetries,
+              consecutiveSameErrorCount,
               fixesApplied: true
             });
             logger.log(`🔍 [RETRY-DEBUG] Database updated with deployment_retrying status`);
@@ -999,6 +1101,8 @@ async function executeInitialGenerationJob(
             // so frontend can still display the saved files
             const errorDetails = {
               status: 'deployment_failed_all_attempts',
+              stuckOnError: stuckOnError,
+              consecutiveRetries: consecutiveSameErrorCount,
               attempts: deploymentAttempt,
               deploymentError: previewData.deploymentError,
               deploymentLogs: previewData.deploymentLogs ? previewData.deploymentLogs.substring(0, 1000) : undefined,
