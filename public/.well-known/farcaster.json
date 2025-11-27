@@ -13,8 +13,8 @@
     "primaryCategory": "social"
   },
     "accountAssociation": {
-      "header": "eyJmaWQiOjEwNDk4MzUsInR5cGUiOiJhdXRoIiwia2V5IjoiMHg2MTc0M0RCNjYzZEYwZjU3REYyYWFjMjlGY0U2MzBBQzhDNUMwQUE1In0",
-      "payload": "eyJkb21haW4iOiJtaW5pYXBwLm1pbmlkZXYuZnVuIn0",
-      "signature": "qReMRFRzCZ8zbhnIL0j2+lGHmct4MKJP370pPnr0UXR0Pfkh/KUE7gAJFjWIY1EF+Dmm+905B8pDtOJXGnY7Hhw="
-    }
+    "header": "eyJmaWQiOjExNDY5MzcsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHg1ZTE2ZjlGQjdENDQ3NEJBNTc2YjZkM0FENDhBQzQ0N0QzOEU0NDU0In0",
+    "payload": "eyJkb21haW4iOiJtaW5pYXBwLm1pbmlkZXYuZnVuIn0",
+    "signature": "YteZm+WuAdWUJHV93dpwTjzd2a/VKB7RWVzMSvt9wXB+twaRbgXydRzftAWA1Y/6byvAAbiKcUVX1kiatBu2NRs="
+  }
 }
