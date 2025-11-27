@@ -177,9 +177,7 @@ farcaster-miniapp/
 │   │   │   ├── ToggleGroup.tsx     # import from '@/components/ui/ToggleGroup'
 │   │   │   ├── Toolbar.tsx         # import from '@/components/ui/Toolbar'
 │   │   │   └── Tooltip.tsx         # import from '@/components/ui/Tooltip'
-│   │   ├── auth/                   # Authentication components
-│   │   └── wallet/                 # Wallet integration
-│   │       └── ConnectWallet.tsx   # Wallet connection UI
+│   │   └── auth/                   # Authentication components (if needed)
 │   ├── hooks/                      # Custom React hooks
 │   │   ├── useUser.ts              # Unified user hook (Farcaster + Wallet)
 │   │   └── index.ts                # Hook exports
@@ -252,13 +250,22 @@ const FARCASTER_BOILERPLATE_CONTEXT = {
     useUser: {
       location: "src/hooks/useUser.ts",
       purpose: "Unified user authentication for Farcaster miniapp and browser",
-      usage: "const { username, fid, isMiniApp, isLoading } = useUser()",
+      usage: "const { username, fid, address, isMiniApp, isLoading, isWalletConnected } = useUser()",
       features: [
         "Auto-detects Farcaster miniapp vs browser",
         "Provides Farcaster user data (fid, username, displayName, pfpUrl)",
+        "AUTO-CONNECTS WALLET via sdk.wallet.ethProvider.request({ method: 'eth_requestAccounts' })",
+        "No ConnectWallet button needed - wallet connection is automatic!",
         "Handles loading states and errors",
         "Single source of truth for user data",
       ],
+      autoWalletConnect: "Wallet is automatically connected when useUser() is called in a Farcaster miniapp",
+    },
+    useFarcasterWallet: {
+      location: "src/hooks/useFarcasterWallet.ts",
+      purpose: "Programmatic wallet connection for blockchain transactions",
+      usage: "const { connectWallet, isConnecting, address, isConnected } = useFarcasterWallet()",
+      useCase: "Use when you need to explicitly ensure wallet is connected before a transaction",
     },
     tabs: {
       location: "src/components/ui/Tabs.tsx",
@@ -1075,7 +1082,6 @@ OUTPUT FORMAT (JSON ONLY) - FOLLOW-UP CHANGES:
           "lines": [
             "'use client';",
             "",
-            " import { ConnectWallet } from '@/components/wallet/ConnectWallet';",
             " import { Tabs } from '@/components/ui/Tabs';",
             "+import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';",
             "+import { useAccount } from 'wagmi';",
@@ -1084,7 +1090,7 @@ OUTPUT FORMAT (JSON ONLY) - FOLLOW-UP CHANGES:
           ]
         }
       ],
-      "unifiedDiff": "@@ -1,3 +1,6 @@\n'use client';\n\n import { ConnectWallet } from '@/components/wallet/ConnectWallet';\n import { Tabs } from '@/components/ui/Tabs';\n+import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';\n+import { useAccount } from 'wagmi';\n import { useUser } from '@/hooks';\n \n@@ -40,10 +43,25 @@\n   const tabs = [\n     {\n       id: 'tab1',\n       title: 'Tab1',\n-      content: (\n-        <div className=\"space-y-4\">\n-          <h1>Tab 1 Content</h1>\n-        </div>\n-      )\n+      content: (\n+        <div className=\"space-y-4\">\n+          <h1>Token Airdrop</h1>\n+          <p>Claim your eligible tokens</p>\n+          <button onClick={handleClaim}>Claim Tokens</button>\n+        </div>\n+      )\n     },\n"
+      "unifiedDiff": "@@ -1,3 +1,6 @@\n'use client';\n\n import { Tabs } from '@/components/ui/Tabs';\n+import { useReadContract, useWriteContract, useWaitForTransactionReceipt } from 'wagmi';\n+import { useAccount } from 'wagmi';\n import { useUser } from '@/hooks';\n \n@@ -40,10 +43,25 @@\n   const tabs = [\n     {\n       id: 'tab1',\n       title: 'Tab1',\n-      content: (\n-        <div className=\"space-y-4\">\n-          <h1>Tab 1 Content</h1>\n-        </div>\n-      )\n+      content: (\n+        <div className=\"space-y-4\">\n+          <h1>Token Airdrop</h1>\n+          <p>Claim your eligible tokens</p>\n+          <button onClick={handleClaim}>Claim Tokens</button>\n+        </div>\n+      )\n     },\n"
     }
   ],
   "implementationNotes": [
@@ -1180,10 +1186,14 @@ ${useUserExample}
 - 🔧 DEPENDENCY MANAGEMENT: If you use external libraries NOT already in package.json, you MUST add them to the dependencies object with appropriate semantic versions (e.g., "recharts": "^2.12.0")
 
 🚨 CRITICAL - UPDATE GENERIC TITLES/HEADINGS:
-- The boilerplate contains generic placeholder titles like "Farcaster Miniapp" or "Web3 App" in h1/h2 tags
+- The boilerplate contains generic placeholder titles like "My App" in h1 tags and metadata
 - YOU MUST replace these generic titles with the ACTUAL APP NAME based on the user's intent
-- Look for hardcoded text like "Farcaster Miniapp", "My App", "Web3 App" in page.tsx and update them
+- UPDATE THESE LOCATIONS:
+  1. src/app/layout.tsx - metadata.title and metadata.description
+  2. src/components/layout/Navbar.tsx - the h1 element text
+  3. src/app/page.tsx - any h1/h2 headings
 - The app title should reflect what the user is building (e.g., "Music Player", "Todo List", "NFT Gallery")
+- NEVER leave generic text like "My App", "Farcaster Miniapp", or "Web3 App" in the final output
 - Also update any generic subtitles or descriptions to match the app's purpose
 - Check src/app/page.tsx and any other files with generic placeholder text
 `;
@@ -1808,7 +1818,7 @@ EXAMPLE OUTPUT FOR EXISTING FILE (from list above):
 {
   "filename": "src/app/page.tsx",
   "operation": "modify",
-  "unifiedDiff": "@@ -5,3 +5,6 @@\n import { ConnectWallet } from '@/components/wallet/ConnectWallet';\n import { Tabs } from '@/components/ui/Tabs';\n+import { useState } from 'react';\n+import { useEffect } from 'react';\n import { useUser } from '@/hooks';\n ",
+  "unifiedDiff": "@@ -5,3 +5,6 @@\n import { Tabs } from '@/components/ui/Tabs';\n import { Button } from '@/components/ui/Button';\n+import { useState } from 'react';\n+import { useEffect } from 'react';\n import { useUser } from '@/hooks';\n ",
   "diffHunks": [
     {
       "oldStart": 5,
@@ -1816,8 +1826,8 @@ EXAMPLE OUTPUT FOR EXISTING FILE (from list above):
       "newStart": 5,
       "newLines": 6,
       "lines": [
-        " import { ConnectWallet } from '@/components/wallet/ConnectWallet';",
         " import { Tabs } from '@/components/ui/Tabs';",
+        " import { Button } from '@/components/ui/Button';",
         "+import { useState } from 'react';",
         "+import { useEffect } from 'react';",
         " import { useUser } from '@/hooks';",
@@ -1927,14 +1937,14 @@ __START_JSON__
   {
     "filename": "EXACT_SAME_FILENAME",
     "operation": "modify",
-    "unifiedDiff": "@@ -1,3 +1,6 @@\n import { ConnectWallet } from '@/components/wallet/ConnectWallet';\n import { Tabs } from '@/components/ui/Tabs';\n+import { useReadContract } from 'wagmi';\n+import { useAccount } from 'wagmi';\n import { useUser } from '@/hooks';\n ",
+    "unifiedDiff": "@@ -1,3 +1,6 @@\n import { Tabs } from '@/components/ui/Tabs';\n import { Button } from '@/components/ui/Button';\n+import { useReadContract } from 'wagmi';\n+import { useAccount } from 'wagmi';\n import { useUser } from '@/hooks';\n ",
     "diffHunks": [
       {
         "oldStart": 1,
         "oldLines": 3,
         "newStart": 1,
         "newLines": 6,
-        "lines": [" import { ConnectWallet } from '@/components/wallet/ConnectWallet';", " import { Tabs } from '@/components/ui/Tabs';", "+import { useReadContract } from 'wagmi';", "+import { useAccount } from 'wagmi';", " import { useUser } from '@/hooks';", " "]
+        "lines": [" import { Tabs } from '@/components/ui/Tabs';", " import { Button } from '@/components/ui/Button';", "+import { useReadContract } from 'wagmi';", "+import { useAccount } from 'wagmi';", " import { useUser } from '@/hooks';", " "]
       }
     ]
   }
@@ -2163,11 +2173,11 @@ export function validateImportsAndReferences(
         }
 
         // Skip validation for known boilerplate imports that should exist
+        // NOTE: ConnectWallet removed - Farcaster apps don't have manual wallet UI
         const knownBoilerplateImports = [
           "@/components/ui/Button",
           "@/components/ui/Input",
           "@/components/ui/Tabs",
-          "@/components/wallet/ConnectWallet",
           "@/hooks",
           "@/hooks/useUser",
           "@/lib/utils",
