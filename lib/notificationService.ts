@@ -92,8 +92,12 @@ export async function sendNotification(
       return false;
     }
 
+    // Get the frame URL (homeUrl from farcaster.json manifest)
+    const frameUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://miniapp.minidev.fun/';
+    
     logger.log(`📤 Attempting to send notification via Neynar:`, {
       targetFid: user.farcasterFid,
+      frameUrl,
       title,
       body,
       targetUrl: notificationPayload.targetUrl,
@@ -112,7 +116,9 @@ export async function sendNotification(
         body: JSON.stringify({
           // Target users by FID
           target_fids: [user.farcasterFid],
-          // Notification content must be wrapped in a 'notification' object
+          // The frame URL must match the homeUrl in your farcaster.json
+          frame_url: frameUrl,
+          // Notification content
           notification: {
             title,
             body,

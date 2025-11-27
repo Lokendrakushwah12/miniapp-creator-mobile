@@ -225,6 +225,8 @@ function HomeContent() {
           {/* User Profile Header - positioned above chat only */}
           <UserProfileHeader 
             onOpenSidebar={() => setIsSidebarOpen(!isSidebarOpen)}
+            activeAgent={activeAgent}
+            feeModelType={feeModelType}
           />
           
           {/* Chat Interface */}

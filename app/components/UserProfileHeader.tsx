@@ -3,13 +3,17 @@
 import { useState, useRef, useEffect } from 'react';
 import Image from 'next/image';
 import { useAuthContext } from '../contexts/AuthContext';
+import BalanceDisplay from './BalanceDisplay';
+import type { EarnKit } from '@earnkit/earn';
 
 
 interface UserProfileHeaderProps {
   onOpenSidebar?: () => void;
+  activeAgent?: EarnKit | null;
+  feeModelType?: "free-tier" | "credit-based";
 }
 
-export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
+export function UserProfileHeader({ onOpenSidebar, activeAgent, feeModelType = "credit-based" }: UserProfileHeaderProps) {
   const { user, handleSessionExpired, walletAddress } = useAuthContext();
   const [showDropdown, setShowDropdown] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -163,11 +167,13 @@ export function UserProfileHeader({ onOpenSidebar }: UserProfileHeaderProps) {
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Farcaster badge */}
-        <div className="flex items-center gap-2 px-3 py-1.5 bg-purple-50 border border-purple-200 rounded-full">
-          <Image src="/farcaster.svg" alt="Farcaster" width={16} height={16} className="w-4 h-4" />
-          <span className="text-xs font-medium text-purple-700">Connected</span>
-        </div>
+        {/* Balance and Top-up */}
+        {activeAgent && (
+          <BalanceDisplay
+            activeAgent={activeAgent}
+            feeModelType={feeModelType}
+          />
+        )}
       </div>
     </div>
   );
