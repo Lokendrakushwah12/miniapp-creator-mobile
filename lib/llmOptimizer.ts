@@ -26,18 +26,23 @@ const createDebugLogDir = (projectId: string): string => {
 
 const logStageResponse = (projectId: string, stageName: string, response: string, metadata?: Record<string, unknown>): void => {
   try {
+    // TRUNCATE response to avoid flooding logs with entire code files
+    const truncatedResponse = response.length > 500 
+      ? `${response.substring(0, 500)}... [TRUNCATED - full response: ${response.length} chars]`
+      : response;
+    
     const logContent = {
       timestamp: new Date().toISOString(),
       stage: stageName,
       projectId,
       metadata,
       responseLength: response.length,
-      response: response
+      response: truncatedResponse  // Use truncated version for console logs
     };
     
     // In production (Vercel), use structured console logging instead of file system
     if (process.env.NODE_ENV === 'production') {
-      logger.log(`[${stageName}] ${JSON.stringify(logContent)}`);
+      logger.log(`[${stageName}] Response length: ${response.length} chars (truncated in logs)`);
     } else {
       // In development, still write to files
       const debugDir = createDebugLogDir(projectId);
@@ -2586,9 +2591,12 @@ export async function executeFollowUpPipeline(
   validationResult?: { success: boolean; errors: Array<{ file: string; line?: number; column?: number; message: string; severity: string }>; warnings: Array<{ file: string; line?: number; column?: number; message: string; severity: string }>; info?: Array<{ file: string; message: string }> };
 }> {
   try {
-    logger.log("🚀 Starting FOLLOW-UP CHANGES pipeline...");
-    logger.log("📝 User Prompt:", userPrompt);
-    logger.log("📁 Current Files Count:", currentFiles.length);
+    logger.log("\n[EDIT-PHASE] ========================================");
+    logger.log("[EDIT-PHASE] 🚀 STARTING FOLLOW-UP CHANGES PIPELINE");
+    logger.log("[EDIT-PHASE] ========================================");
+    logger.log("[EDIT-PHASE] 📝 User Prompt (first 200 chars):", userPrompt.substring(0, 200));
+    logger.log("[EDIT-PHASE] 📁 Current Files Count:", currentFiles.length);
+    logger.log("[EDIT-PHASE] 📁 Current Files:", currentFiles.map(f => f.filename));
 
     // Stage 1: Intent Parser
     const intentSpec = await executeStage1IntentParser(userPrompt, callLLM, projectId, appType);
@@ -2622,6 +2630,9 @@ export async function executeFollowUpPipeline(
     );
 
     // Stage 3: Code Generator (Diffs) - using filtered files
+    logger.log("[EDIT-PHASE] Stage 3: Starting code generation...");
+    logger.log("[EDIT-PHASE] Stage 3: Input files count:", filteredFiles.length);
+    
     const stage3Result = await executeStage3FollowUpGeneration(
       userPrompt,
       patchPlan,
@@ -2632,9 +2643,20 @@ export async function executeFollowUpPipeline(
       appType
     );
     const { files: filesWithDiffs, diffs } = stage3Result;
+    
+    logger.log("[EDIT-PHASE] Stage 3: Complete");
+    logger.log("[EDIT-PHASE] Stage 3: Output files count:", filesWithDiffs.length);
+    logger.log("[EDIT-PHASE] Stage 3: Output files:", filesWithDiffs.map(f => f.filename));
+    logger.log("[EDIT-PHASE] Stage 3: Diffs generated:", diffs.length);
+    diffs.forEach(d => {
+      logger.log(`[EDIT-PHASE] Stage 3: Diff for ${d.filename}: ${d.hunks?.length || 0} hunks`);
+    });
 
     // Stage 4: Validator (Diffs) - using ORIGINAL files for validation context
     // Note: Validator needs full file list to check imports/references correctly
+    logger.log("[EDIT-PHASE] Stage 4: Starting validation...");
+    logger.log("[EDIT-PHASE] Stage 4: Files to validate:", filesWithDiffs.map(f => f.filename));
+    
     const { validatedFiles, validationResult } = await executeStage4FollowUpValidation(
       filesWithDiffs,
       currentFiles, // ← Using original currentFiles for validation context
@@ -2643,19 +2665,38 @@ export async function executeFollowUpPipeline(
       projectDir
     );
 
+    logger.log("[EDIT-PHASE] Stage 4: Validation complete");
+    logger.log("[EDIT-PHASE] Stage 4: Validated files count:", validatedFiles.length);
+    logger.log("[EDIT-PHASE] Stage 4: Validated files:", validatedFiles.map(f => f.filename));
+
     // Filter out protected config files to prevent LLM from overwriting boilerplate
     const finalFiles = filterProtectedConfigFiles(validatedFiles) as { filename: string; content: string }[];
 
-    logger.log("\n" + "=".repeat(50));
-    logger.log("🎉 FOLLOW-UP PIPELINE COMPLETED!");
-    logger.log("=".repeat(50));
-    logger.log(`📁 Generated ${finalFiles.length} files`);
-    logger.log(`📝 Applied ${diffs.length} diffs`);
+    logger.log("\n[EDIT-PHASE] ========================================");
+    logger.log("[EDIT-PHASE] 🎉 FOLLOW-UP PIPELINE COMPLETED!");
+    logger.log("[EDIT-PHASE] ========================================");
+    logger.log(`[EDIT-PHASE] 📁 Final files count: ${finalFiles.length}`);
+    logger.log(`[EDIT-PHASE] 📁 Final files:`, finalFiles.map(f => f.filename));
+    logger.log(`[EDIT-PHASE] 📝 Applied ${diffs.length} diffs`);
+    
+    // Log content preview for changed files (truncated)
+    for (const file of finalFiles) {
+      const original = currentFiles.find(f => f.filename === file.filename);
+      if (original) {
+        const changed = original.content !== file.content;
+        logger.log(`[EDIT-PHASE] File: ${file.filename} - ${changed ? 'CHANGED' : 'UNCHANGED'} (${file.content.length} chars)`);
+        if (changed) {
+          logger.log(`[EDIT-PHASE]   Original length: ${original.content.length}, New length: ${file.content.length}`);
+        }
+      } else {
+        logger.log(`[EDIT-PHASE] File: ${file.filename} - NEW FILE (${file.content.length} chars)`);
+      }
+    }
     
     if (validationResult) {
-      logger.log(`✅ Validation Success: ${validationResult.success}`);
-      logger.log(`❌ Validation Errors: ${validationResult.errors.length}`);
-      logger.log(`⚠️  Validation Warnings: ${validationResult.warnings.length}`);
+      logger.log(`[EDIT-PHASE] ✅ Validation Success: ${validationResult.success}`);
+      logger.log(`[EDIT-PHASE] ❌ Validation Errors: ${validationResult.errors.length}`);
+      logger.log(`[EDIT-PHASE] ⚠️  Validation Warnings: ${validationResult.warnings.length}`);
     }
 
     return { files: finalFiles, diffs, intentSpec, validationResult };

@@ -1398,8 +1398,13 @@ export async function PATCH(request: NextRequest) {
       });
     } else if (useDiffBased) {
       // Handle diff-based updates
-      logger.log(`🔄 Diff-based update for project ${projectId}`);
-      logger.log("User prompt:", prompt);
+      logger.log("\n[EDIT-API] ========================================");
+      logger.log("[EDIT-API] 🔄 STARTING DIFF-BASED UPDATE");
+      logger.log("[EDIT-API] ========================================");
+      logger.log(`[EDIT-API] Project ID: ${projectId}`);
+      logger.log(`[EDIT-API] User prompt (first 200 chars): ${prompt.substring(0, 200)}`);
+      logger.log(`[EDIT-API] Input files count: ${currentFiles.length}`);
+      logger.log(`[EDIT-API] Input files:`, currentFiles.map(f => f.filename));
 
       // Execute diff-based pipeline
       const result = await executeDiffBasedPipeline(
@@ -1415,7 +1420,26 @@ export async function PATCH(request: NextRequest) {
         userDir
       );
 
-      logger.log(`✅ Generated ${result.files.length} files with ${result.diffs.length} diffs`);
+      logger.log("\n[EDIT-API] ========================================");
+      logger.log("[EDIT-API] PIPELINE RESULT");
+      logger.log("[EDIT-API] ========================================");
+      logger.log(`[EDIT-API] Output files count: ${result.files.length}`);
+      logger.log(`[EDIT-API] Output files:`, result.files.map(f => f.filename));
+      logger.log(`[EDIT-API] Diffs count: ${result.diffs.length}`);
+      
+      // Log which files actually changed
+      for (const file of result.files) {
+        const original = currentFiles.find(f => f.filename === file.filename);
+        if (original) {
+          const changed = original.content !== file.content;
+          logger.log(`[EDIT-API] File: ${file.filename} - ${changed ? 'CHANGED' : 'UNCHANGED'}`);
+          if (changed) {
+            logger.log(`[EDIT-API]   Original: ${original.content.length} chars, New: ${file.content.length} chars`);
+          }
+        } else {
+          logger.log(`[EDIT-API] File: ${file.filename} - NEW FILE (${file.content.length} chars)`);
+        }
+      }
 
       // Check validation result and retry with LLM if there are errors
       let finalResult = result;
@@ -1504,34 +1528,45 @@ export async function PATCH(request: NextRequest) {
       }
 
       // Write changes to generated directory
+      logger.log("\n[EDIT-API] ========================================");
+      logger.log("[EDIT-API] PHASE 1: WRITE TO DISK");
+      logger.log("[EDIT-API] ========================================");
+      logger.log(`[EDIT-API] Writing ${finalResult.files.length} files to ${userDir}`);
       await writeFilesToDir(userDir, finalResult.files);
+      logger.log("[EDIT-API] ✅ Files written to disk successfully");
 
       // Update files in the preview - only deploy if validation passed
+      logger.log("\n[EDIT-API] ========================================");
+      logger.log("[EDIT-API] PHASE 2: DEPLOY TO VERCEL");
+      logger.log("[EDIT-API] ========================================");
       try {
-        logger.log("Updating files in preview...");
+        logger.log(`[EDIT-API] Deploying ${finalResult.files.length} files to Vercel...`);
         await updatePreviewFiles(projectId, finalResult.files, accessToken, finalResult.validationResult);
-        logger.log("Preview files updated successfully");
+        logger.log("[EDIT-API] ✅ Vercel deployment successful");
       } catch (previewError) {
         // Check if this is a validation failure (400 status)
         const errorMessage = previewError instanceof Error ? previewError.message : String(previewError);
         if (errorMessage.includes('400') && errorMessage.includes('Validation failed')) {
-          logger.error("❌ Validation failed - preview deployment blocked");
+          logger.error("[EDIT-API] ❌ Validation failed - preview deployment blocked");
           // Continue to save to database even if preview blocked
         } else {
           // For other errors (network, Railway issues), treat as optional
-          logger.warn("⚠️  Failed to update preview files (this is expected on Railway):", previewError);
+          logger.warn("[EDIT-API] ⚠️ Failed to update preview files:", previewError);
         }
-        logger.log("📁 Files will be saved to database");
+        logger.log("[EDIT-API] 📁 Continuing to save to database despite deployment failure");
       }
 
       // Update project files in database
+      logger.log("\n[EDIT-API] ========================================");
+      logger.log("[EDIT-API] PHASE 3: SAVE TO DATABASE");
+      logger.log("[EDIT-API] ========================================");
       try {
-        logger.log("💾 Updating project files in database...");
-        
         // First, check if the project exists in the database
         const existingProject = await getProjectById(projectId);
+        logger.log(`[EDIT-API] Project exists in DB: ${!!existingProject}`);
+        
         if (!existingProject) {
-          logger.log(`⚠️ Project ${projectId} not found in database, creating it...`);
+          logger.log(`[EDIT-API] Creating project ${projectId} in database...`);
           
           // Create the project in the database
           await createProject(
@@ -1542,28 +1577,34 @@ export async function PATCH(request: NextRequest) {
             projectId,
             appType // Pass appType (loaded from project or defaulted to 'farcaster')
           );
-          logger.log(`✅ Created project ${projectId} in database`);
+          logger.log(`[EDIT-API] ✅ Created project ${projectId} in database`);
         }
         
         // Read all files from the updated directory and save them
         const allFiles = await readAllFiles(userDir);
-        logger.log(`📁 Found ${allFiles.length} files to save to database`);
+        logger.log(`[EDIT-API] Read ${allFiles.length} files from disk`);
         
         // Filter out any files that might cause encoding issues
         const safeFiles = allFiles.filter(file => {
           // Check for potential encoding issues
           if (file.content.includes('\0') || file.content.includes('\x00')) {
-            logger.log(`⚠️ Skipping file with null bytes: ${file.filename}`);
+            logger.log(`[EDIT-API] ⚠️ Skipping file with null bytes: ${file.filename}`);
             return false;
           }
           return true;
         });
         
-        logger.log(`📁 Saving ${safeFiles.length} safe files to database`);
+        logger.log(`[EDIT-API] Saving ${safeFiles.length} files to database...`);
+        logger.log(`[EDIT-API] Files to save:`, safeFiles.map(f => `${f.filename} (${f.content.length} chars)`));
         await saveProjectFiles(projectId, safeFiles);
-        logger.log("✅ Project files updated in database successfully");
+        logger.log("[EDIT-API] ✅ Project files saved to database successfully");
+        
+        // Verify files were saved by checking what's in DB
+        const { getProjectFiles } = await import('../../../lib/database');
+        const savedFiles = await getProjectFiles(projectId);
+        logger.log(`[EDIT-API] ✅ Verification: ${savedFiles.length} files now in database`);
       } catch (dbError) {
-        logger.error("⚠️ Failed to update project files in database:", dbError);
+        logger.error("[EDIT-API] ❌ Failed to update project files in database:", dbError);
         // Don't fail the request if database update fails
       }
 

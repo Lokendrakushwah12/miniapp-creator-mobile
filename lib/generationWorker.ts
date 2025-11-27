@@ -1408,7 +1408,13 @@ async function executeFollowUpJob(
     throw new Error(`No existing files found for project ${projectId}`);
   }
 
-  logger.log(`✅ Loaded ${currentFiles.length} files for follow-up edit`);
+  logger.log("\n[EDIT-WORKER] ========================================");
+  logger.log("[EDIT-WORKER] 🚀 STARTING FOLLOW-UP EDIT");
+  logger.log("[EDIT-WORKER] ========================================");
+  logger.log(`[EDIT-WORKER] Project ID: ${projectId}`);
+  logger.log(`[EDIT-WORKER] Input files count: ${currentFiles.length}`);
+  logger.log(`[EDIT-WORKER] Input files:`, currentFiles.map(f => f.filename));
+  logger.log(`[EDIT-WORKER] Prompt (first 200 chars): ${prompt.substring(0, 200)}`);
 
   // Create LLM caller
   const callLLM = async (
@@ -1428,7 +1434,7 @@ async function executeFollowUpJob(
   // Execute appropriate pipeline
   let result;
   if (useDiffBased) {
-    logger.log("🔄 Using diff-based pipeline for follow-up edit");
+    logger.log("[EDIT-WORKER] Using diff-based pipeline");
     result = await executeDiffBasedPipeline(
       prompt,
       currentFiles,
@@ -1442,7 +1448,7 @@ async function executeFollowUpJob(
       userDir
     );
   } else {
-    logger.log("🔄 Using enhanced pipeline for follow-up edit");
+    logger.log("[EDIT-WORKER] Using enhanced pipeline");
     result = await executeEnhancedPipeline(
       prompt,
       currentFiles,
@@ -1458,23 +1464,55 @@ async function executeFollowUpJob(
   // Check if result has diffs (from diff-based pipeline)
   const hasDiffs = 'diffs' in result && result.diffs;
   const diffCount = hasDiffs ? (result as { diffs: unknown[] }).diffs.length : 0;
-  logger.log(`✅ Generated ${result.files.length} files${hasDiffs ? ` with ${diffCount} diffs` : ''}`);
+  
+  logger.log("\n[EDIT-WORKER] ========================================");
+  logger.log("[EDIT-WORKER] PIPELINE RESULT");
+  logger.log("[EDIT-WORKER] ========================================");
+  logger.log(`[EDIT-WORKER] Output files count: ${result.files.length}`);
+  logger.log(`[EDIT-WORKER] Output files:`, result.files.map(f => f.filename));
+  logger.log(`[EDIT-WORKER] Diffs count: ${diffCount}`);
+  
+  // Log which files actually changed
+  for (const file of result.files) {
+    const original = currentFiles.find(f => f.filename === file.filename);
+    if (original) {
+      const changed = original.content !== file.content;
+      logger.log(`[EDIT-WORKER] File: ${file.filename} - ${changed ? 'CHANGED' : 'UNCHANGED'}`);
+      if (changed) {
+        logger.log(`[EDIT-WORKER]   Original: ${original.content.length} chars, New: ${file.content.length} chars`);
+      }
+    } else {
+      logger.log(`[EDIT-WORKER] File: ${file.filename} - NEW FILE (${file.content.length} chars)`);
+    }
+  }
 
-  // Write changes to disk
+  // PHASE 1: Write changes to disk
+  logger.log("\n[EDIT-WORKER] ========================================");
+  logger.log("[EDIT-WORKER] PHASE 1: WRITE TO DISK");
+  logger.log("[EDIT-WORKER] ========================================");
   await writeFilesToDir(userDir, result.files);
   await saveFilesToGenerated(projectId, result.files);
+  logger.log(`[EDIT-WORKER] ✅ ${result.files.length} files written to disk`);
 
-  // Save to database first
+  // PHASE 2: Save to database
+  logger.log("\n[EDIT-WORKER] ========================================");
+  logger.log("[EDIT-WORKER] PHASE 2: SAVE TO DATABASE");
+  logger.log("[EDIT-WORKER] ========================================");
   const safeFiles = result.files.filter(file => {
     if (file.content.includes('\0') || file.content.includes('\x00')) {
-      logger.log(`⚠️ Skipping file with null bytes: ${file.filename}`);
+      logger.log(`[EDIT-WORKER] ⚠️ Skipping file with null bytes: ${file.filename}`);
       return false;
     }
     return true;
   });
 
+  logger.log(`[EDIT-WORKER] Saving ${safeFiles.length} files to database...`);
   await saveProjectFiles(projectId, safeFiles);
-  logger.log("✅ Project files updated in database");
+  logger.log("[EDIT-WORKER] ✅ Project files saved to database");
+  
+  // Verify files were saved
+  const savedFilesCheck = await getProjectFiles(projectId);
+  logger.log(`[EDIT-WORKER] ✅ Verification: ${savedFilesCheck.length} files now in database`);
 
   // Check if project has contracts (Web3) by looking for contracts directory
   const hasContracts = result.files.some(f => 
@@ -1482,14 +1520,16 @@ async function executeFollowUpJob(
   );
   const isWeb3 = hasContracts; // Whether contracts exist (for potential deployment)
 
-  // Redeploy to Vercel with updated files
+  // PHASE 3: Redeploy to Vercel with updated files
+  logger.log("\n[EDIT-WORKER] ========================================");
+  logger.log("[EDIT-WORKER] PHASE 3: DEPLOY TO VERCEL");
+  logger.log("[EDIT-WORKER] ========================================");
+  logger.log(`[EDIT-WORKER] Deploying ${result.files.length} files to Vercel...`);
+  
   let deploymentFailed = false;
   let deploymentError = '';
   
   try {
-    logger.log("\n" + "=".repeat(60));
-    logger.log("🚀 REDEPLOYING TO VERCEL");
-    logger.log("=".repeat(60));
     
     const previewData = await redeployToVercel(
       projectId,
@@ -1500,8 +1540,8 @@ async function executeFollowUpJob(
       jobId
     );
     
-    logger.log("✅ Vercel deployment successful!");
-    logger.log(`🌐 Vercel URL: ${previewData.vercelUrl || 'N/A'}`);
+    logger.log("[EDIT-WORKER] ✅ Vercel deployment successful!");
+    logger.log(`[EDIT-WORKER] 🌐 Vercel URL: ${previewData.vercelUrl || 'N/A'}`);
 
     // Update project with deployment URL (should be same as initial deployment)
     // The URL is stored for redundancy/verification, but it should not change
@@ -1511,23 +1551,20 @@ async function executeFollowUpJob(
       const urlChanged = project?.vercelUrl !== previewData.vercelUrl;
       
       if (urlChanged) {
-        logger.log(`⚠️ Vercel URL changed: ${project?.vercelUrl} → ${previewData.vercelUrl}`);
-        logger.log(`   This is unexpected - we should be deploying to the same project`);
+        logger.log(`[EDIT-WORKER] ⚠️ Vercel URL changed: ${project?.vercelUrl} → ${previewData.vercelUrl}`);
       }
       
       await updateProject(projectId, {
         previewUrl: previewData.vercelUrl,
         vercelUrl: previewData.vercelUrl,
       });
-      logger.log(`✅ Project deployment URL confirmed: ${previewData.vercelUrl}`);
+      logger.log(`[EDIT-WORKER] ✅ Project URL updated in database: ${previewData.vercelUrl}`);
     }
   } catch (deployError) {
     deploymentFailed = true;
     deploymentError = deployError instanceof Error ? deployError.message : String(deployError);
-    logger.error("❌ Vercel deployment failed:", deployError);
-    logger.error("❌ Deployment error message:", deploymentError);
-    logger.warn("⚠️ Files are saved to database, but Vercel deployment failed");
-    logger.warn("⚠️ Job will be marked as FAILED due to deployment error");
+    logger.error("[EDIT-WORKER] ❌ Vercel deployment failed:", deploymentError);
+    logger.warn("[EDIT-WORKER] ⚠️ Files are saved to database, but Vercel deployment failed");
   }
 
   // Store patch for rollback (if diffs available and deployment succeeded)
