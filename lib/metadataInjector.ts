@@ -36,12 +36,8 @@ export function injectDynamicMetadata(
     // Use baseUrl if provided, otherwise construct from app name
     const appUrl = baseUrl || `https://${sanitizedAppName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}.minidev.fun`;
     
-    // Generate OG image URL with app name and optional icon
-    const ogImageParams = new URLSearchParams({ name: sanitizedAppName });
-    if (iconUrl) {
-      ogImageParams.set('icon', iconUrl);
-    }
-    const ogImageUrl = `${process.env.NEXT_PUBLIC_APP_URL || 'https://minidev.fun'}/api/og-image?${ogImageParams.toString()}`;
+    // Use static OG image from the app's public folder
+    const ogImageUrl = `${appUrl}/og.png`;
 
     // The new metadata object to inject
     const newMetadataContent = `export const metadata: Metadata = {
