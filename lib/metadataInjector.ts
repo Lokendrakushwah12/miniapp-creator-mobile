@@ -24,7 +24,8 @@ export function injectDynamicMetadata(
   appName: string,
   appDescription?: string,
   baseUrl?: string,
-  iconUrl?: string
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _iconUrl?: string // Kept for API compatibility, currently unused
 ): string {
   try {
     // Sanitize appName to prevent issues with special characters in strings
@@ -36,7 +37,7 @@ export function injectDynamicMetadata(
     // Use baseUrl if provided, otherwise construct from app name
     const appUrl = baseUrl || `https://${sanitizedAppName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '')}.minidev.fun`;
     
-    // Use static OG image from the app's public folder
+      // Use static OG image from the app's public folder
     const ogImageUrl = `${appUrl}/og.png`;
 
     // The new metadata object to inject
