@@ -11,7 +11,6 @@ import { useQueryClient, useQuery } from '@tanstack/react-query';
 import type { EarnKit } from '@earnkit/earn';
 import { toast } from 'react-hot-toast';
 import { TextShimmer } from "./text-shimmer";
-import TopUpDialog from './top-up-dialog';
 interface GeneratedProject {
     projectId: string;
     port: number;
@@ -1584,39 +1583,6 @@ Please build this project with all the features and requirements discussed above
 
             {/* Chat Input - Fixed at bottom */}
             <div className="flex-shrink-0 pb-4 px-[20px] bg-gray-100">
-                {/* Balance & Top Up Section */}
-                {activeAgent && !credsOff && (
-                    <div className="mb-3 flex items-center justify-between bg-white rounded-full px-4 py-2.5 border border-gray-200">
-                        <div className="flex items-center gap-2">
-                            <svg className="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                            </svg>
-                            <span className="text-sm text-gray-700 font-medium">
-                                {walletAddress ? (
-                                    balance ? `${balance.credits} Credits` : '0 Credits'
-                                ) : (
-                                    'Connect wallet'
-                                )}
-                            </span>
-                        </div>
-                        {walletAddress && (
-                            <TopUpDialog
-                                activeAgent={activeAgent}
-                                feeModelType="credit-based"
-                                onSuccess={() => {
-                                    queryClient.invalidateQueries({ queryKey: ["balance"] });
-                                }}
-                            >
-                                <button
-                                    className="px-3 py-1 bg-black text-white rounded-full text-xs font-medium hover:bg-gray-800 transition-colors"
-                                >
-                                    Top Up
-                                </button>
-                            </TopUpDialog>
-                        )}
-                    </div>
-                )}
-                
                 {/* Wallet/Credits Warning */}
                 {shouldBlockChat && (
                     <div className="mb-3">
