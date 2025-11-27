@@ -759,7 +759,7 @@ export function PublishModal({ isOpen, onClose, projectUrl, projectId }: Publish
                                             alt="Farcaster" 
                                             width={20} 
                                             height={20}
-                                            className="w-5 h-5 brightness-0 invert"
+                                            className="w-5 h-5"
                                         />
                                         Share on Farcaster
                                     </button>
