@@ -827,10 +827,9 @@ export function PublishModal({
                
                {/* Task Progress List */}
                <div className="w-full max-w-md space-y-3 mb-6">
-                 {publishingTasks.map((task, index) => {
-                   const isCompleted = index < currentTaskIndex - 1;
-                   const isCurrent = index === currentTaskIndex - 1;
-                   const isPending = index >= currentTaskIndex;
+                {publishingTasks.map((task, index) => {
+                  const isCompleted = index < currentTaskIndex - 1;
+                  const isCurrent = index === currentTaskIndex - 1;
                    
                    return (
                      <div
