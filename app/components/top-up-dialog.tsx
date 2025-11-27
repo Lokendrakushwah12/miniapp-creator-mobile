@@ -111,6 +111,14 @@ export default function TopUpDialog({
 
             const agentId = keccak256(toBytes(escrowContract.depositFunction.agentIdParam));
             
+            logger.log("🔄 Preparing transaction:", {
+                to: escrowContract.address,
+                value: option.value,
+                valueHex: `0x${BigInt(option.value).toString(16)}`,
+                agentId,
+                chainId: base.id,
+            });
+            
             // Encode the function data for the deposit call
             const data = encodeFunctionData({
                 abi,
@@ -118,14 +126,26 @@ export default function TopUpDialog({
                 args: [agentId as `0x${string}`],
             });
             
+            // First, ensure we're on the correct chain (Base)
+            try {
+                await sdk.wallet.ethProvider.request({
+                    method: 'wallet_switchEthereumChain',
+                    params: [{ chainId: `0x${base.id.toString(16)}` }],
+                });
+            } catch (switchError: unknown) {
+                // Chain might not be added, or user rejected - log but continue
+                logger.log("Chain switch result:", switchError);
+            }
+
             // Use Farcaster SDK ethProvider to send the transaction
+            // Note: Don't include chainId in the transaction params - it's set by the wallet
             const hash = await sdk.wallet.ethProvider.request({
                 method: 'eth_sendTransaction',
                 params: [{
+                    from: walletAddress as `0x${string}`,
                     to: escrowContract.address as `0x${string}`,
-                    value: `0x${BigInt(option.value).toString(16)}` as `0x${string}`,
+                    value: `0x${BigInt(option.value).toString(16)}`,
                     data,
-                    chainId: `0x${base.id.toString(16)}` as `0x${string}`,
                 }],
             }) as `0x${string}`;
 
@@ -173,9 +193,21 @@ export default function TopUpDialog({
             } else {
                 toast.error("Transaction was not completed", { id: txToast });
             }
-        } catch (error) {
-            logger.log("Top-up error:", error);
-            toast.error("Top-up failed. See console for details.");
+        } catch (error: unknown) {
+            logger.error("Top-up error:", error);
+            
+            // Better error messages based on error type
+            if (error instanceof Error) {
+                if (error.message.includes('rejected') || error.message.includes('denied')) {
+                    toast.error("Transaction was rejected", { id: txToast });
+                } else if (error.message.includes('insufficient')) {
+                    toast.error("Insufficient funds for transaction", { id: txToast });
+                } else {
+                    toast.error(`Transaction failed: ${error.message}`, { id: txToast });
+                }
+            } else {
+                toast.error("Top-up failed. See console for details.", { id: txToast });
+            }
         } finally {
             setProcessingOption(null);
             toast.dismiss();
