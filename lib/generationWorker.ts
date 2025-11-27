@@ -994,11 +994,19 @@ async function executeInitialGenerationJob(
             // DON'T throw here - we're inside a try block and it will be caught
             // Instead, we'll break out of the loop and handle failure after
             logger.error("❌ All deployment attempts failed - breaking out of retry loop");
+            
+            // IMPORTANT: Include projectId and generatedFiles in error result
+            // so frontend can still display the saved files
             const errorDetails = {
               status: 'deployment_failed_all_attempts',
               attempts: deploymentAttempt,
               deploymentError: previewData.deploymentError,
-              deploymentLogs: previewData.deploymentLogs ? previewData.deploymentLogs.substring(0, 1000) : undefined
+              deploymentLogs: previewData.deploymentLogs ? previewData.deploymentLogs.substring(0, 1000) : undefined,
+              // Include project data so files can be viewed despite deployment failure
+              projectId: projectId,
+              generatedFiles: generatedFiles.map(f => f.filename),
+              url: `https://${projectId}.${CUSTOM_DOMAIN_BASE}`,
+              port: 3000,
             };
             
             await updateGenerationJobStatus(jobId, 'failed', errorDetails, previewData.deploymentError);
@@ -1047,10 +1055,18 @@ async function executeInitialGenerationJob(
           // If this is the last attempt, fail the job
           logger.error("❌ All deployment attempts failed after exception");
           
+          // IMPORTANT: Include projectId and generatedFiles in error result
+          // so frontend can still display the saved files
           const errorDetails = {
             status: 'deployment_failed_exception',
             attempts: deploymentAttempt,
-            errorType: isTimeoutError ? 'timeout' : 'other'
+            errorType: isTimeoutError ? 'timeout' : 'other',
+            deploymentError: errorMessage,
+            // Include project data so files can be viewed despite deployment failure
+            projectId: projectId,
+            generatedFiles: generatedFiles.map(f => f.filename),
+            url: `https://${projectId}.${CUSTOM_DOMAIN_BASE}`,
+            port: 3000,
           };
           
           await updateGenerationJobStatus(jobId, 'failed', errorDetails, errorMessage);
@@ -1540,6 +1556,7 @@ async function executeFollowUpJob(
   if (deploymentFailed) {
     logger.error("❌ Marking follow-up job as FAILED due to deployment error");
     
+    // IMPORTANT: Include full project data so frontend can display files despite failure
     const errorResult = {
       success: false,
       projectId,
@@ -1548,6 +1565,11 @@ async function executeFollowUpJob(
       status: 'deployment_failed',
       files: result.files.map(f => ({ filename: f.filename })),
       diffs: hasDiffs ? (result as { diffs: unknown[] }).diffs : [],
+      // Include these fields for frontend compatibility
+      generatedFiles: result.files.map(f => f.filename),
+      previewUrl: getPreviewUrl(projectId),
+      url: getPreviewUrl(projectId) || `https://${projectId}.${CUSTOM_DOMAIN_BASE}`,
+      port: 3000,
     };
     
     try {

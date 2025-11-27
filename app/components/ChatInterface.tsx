@@ -122,6 +122,8 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
             setPrompt('');
             setCurrentPhase('requirements');
             setChatProjectId('');
+            // Clear last project ID ref to allow clean state reset
+            lastProjectIdRef.current = null;
             // Clear session storage
             try {
                 sessionStorage.removeItem('minidev_chat_session_id');
@@ -136,6 +138,9 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         }
     }));
     
+    // Track the last known project ID to prevent unnecessary resets
+    const lastProjectIdRef = useRef<string | null>(null);
+
     // Load chat messages when project changes
     useEffect(() => {
         const loadChatMessages = async () => {
@@ -144,16 +149,21 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 sessionToken: !!sessionToken,
                 currentPhase,
                 isSendingMessage: isSendingMessageRef.current,
+                isGenerating,
+                lastProjectId: lastProjectIdRef.current,
                 timestamp: new Date().toISOString()
             });
 
-            // Skip loading if we're currently sending a message to prevent state overwrites
-            if (isSendingMessageRef.current) {
-                logger.log('⏭️ Skipping chat load - message sending in progress');
+            // Skip loading if we're currently sending a message or generating to prevent state overwrites
+            if (isSendingMessageRef.current || isGenerating) {
+                logger.log('⏭️ Skipping chat load - message sending or generation in progress');
                 return;
             }
 
             if (currentProject?.projectId && sessionToken) {
+                // Update last known project ID
+                lastProjectIdRef.current = currentProject.projectId;
+                
                 // Sync chatProjectId with the loaded project to ensure consistency
                 if (chatProjectId !== currentProject.projectId) {
                     setChatProjectId(currentProject.projectId);
@@ -200,23 +210,28 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 } catch (error) {
                     logger.warn('Failed to load chat messages:', error);
                 }
-            } else if (!currentProject && chatProjectId) {
-                // Clear chatProjectId whenever there's no current project
-                // This prevents messages from being saved to the wrong project
-                logger.log('🔄 No current project - clearing stale chatProjectId:', chatProjectId);
-                setChatProjectId('');
-            } else if (!currentProject && currentPhase === 'editing') {
-                // Only reset phase if we're in editing mode and project is cleared
-                // Don't reset during building phase to avoid interrupting generation
-                logger.log('🔄 Project cleared, resetting phase to requirements');
+            } else if (!currentProject && chatProjectId && !isGenerating) {
+                // Only clear chatProjectId if we're NOT generating and the project is intentionally cleared
+                // Check if this is a deliberate new project action by comparing with last known project ID
+                if (lastProjectIdRef.current && lastProjectIdRef.current !== chatProjectId) {
+                    // Project was switched, safe to clear
+                    logger.log('🔄 Project switched - clearing chatProjectId:', chatProjectId);
+                    setChatProjectId('');
+                    lastProjectIdRef.current = null;
+                } else {
+                    // Keep the chatProjectId to prevent losing project context during temporary state changes
+                    logger.log('🔍 Keeping chatProjectId to maintain project context:', chatProjectId);
+                }
+            } else if (!currentProject && currentPhase === 'editing' && !isGenerating && !chatProjectId) {
+                // Only reset phase if we're in editing mode, project is cleared, 
+                // not generating, AND we have no chatProjectId (truly starting fresh)
+                logger.log('🔄 Project cleared completely, resetting phase to requirements');
                 setCurrentPhase('requirements');
-                // Clear chatProjectId to prevent messages from being saved to the old project
-                setChatProjectId('');
-                logger.log('🔄 Cleared chatProjectId to start fresh');
+                lastProjectIdRef.current = null;
             }
 
             // Add welcome message when no project or no messages
-            if (chat.length === 0 && !aiLoading) {
+            if (chat.length === 0 && !aiLoading && !isGenerating) {
                 setChat([{
                     role: 'ai',
                     content: getWelcomeMessage(),
@@ -227,8 +242,8 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         };
 
         loadChatMessages();
-        // REMOVED currentPhase from dependencies to prevent reset loop during generation
-    }, [currentProject, sessionToken, chat.length, aiLoading, currentPhase, chatProjectId]);
+        // Note: Dependencies are intentionally limited to prevent unnecessary resets
+    }, [currentProject, sessionToken, chat.length, aiLoading, isGenerating, currentPhase, chatProjectId]);
 
     // Helper function to get welcome message
     const getWelcomeMessage = () => {
@@ -301,6 +316,31 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         setPrompt(''); // Clear input immediately
         setAiLoading(true);
 
+        // Determine if we should be in editing mode based on project state
+        // This ensures that even if currentPhase is wrong, we still route correctly
+        const projectHasContent = currentProject && (
+            (currentProject.generatedFiles && currentProject.generatedFiles.length > 0) ||
+            currentProject.vercelUrl ||
+            currentProject.previewUrl
+        );
+        
+        // Determine effective phase - use editing if project has content, regardless of currentPhase state
+        const effectivePhase = projectHasContent ? 'editing' : currentPhase;
+        
+        logger.log('🔍 handleSendMessage phase detection:', {
+            currentPhase,
+            effectivePhase,
+            projectHasContent,
+            hasGeneratedFiles: currentProject?.generatedFiles?.length || 0,
+            hasVercelUrl: !!currentProject?.vercelUrl,
+            hasPreviewUrl: !!currentProject?.previewUrl
+        });
+        
+        // If we detected we should be in editing mode but currentPhase is wrong, fix it
+        if (effectivePhase === 'editing' && currentPhase !== 'editing') {
+            logger.log('🔧 Correcting currentPhase to editing');
+            setCurrentPhase('editing');
+        }
 
         // setError(null);
 
@@ -308,7 +348,7 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
         const userMsg: ChatMessage = {
             role: 'user',
             content: userMessage,
-            phase: currentPhase,
+            phase: effectivePhase,
             timestamp: Date.now()
         };
         
@@ -317,15 +357,16 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
 
         // Save user message to database immediately if we have a project
         // This prevents race conditions where messages disappear
-        if (currentProject?.projectId) {
+        const projectIdForSave = currentProject?.projectId || chatProjectId;
+        if (projectIdForSave) {
             try {
-                await fetch(`/api/projects/${currentProject.projectId}/chat`, {
+                await fetch(`/api/projects/${projectIdForSave}/chat`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
                     body: JSON.stringify({
                         role: 'user',
                         content: userMessage,
-                        phase: currentPhase
+                        phase: effectivePhase
                     })
                 });
                 logger.log('💾 User message saved to database (initial save)');
@@ -361,14 +402,14 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                 appType: 'farcaster' // Always Farcaster miniapp
             };
 
-            // Determine the appropriate action based on current phase
-            if (currentPhase === 'requirements') {
+            // Determine the appropriate action based on effective phase (not currentPhase)
+            if (effectivePhase === 'requirements') {
                 body.action = 'requirements_gathering';
-            } else if (currentPhase === 'building') {
+            } else if (effectivePhase === 'building') {
                 body.action = 'confirm_project';
-            } else {
+            } else if (effectivePhase === 'editing') {
                 // For editing phase, directly apply changes without streaming conversation
-                logger.log('🔄 Directly applying changes to existing project...');
+                logger.log('🔄 Directly applying changes to existing project (effectivePhase: editing)...');
 
                 // Set generating state to trigger preview mode switch on mobile
                 generationStartTimeRef.current = Date.now();
@@ -426,60 +467,121 @@ export const ChatInterface = forwardRef<ChatInterfaceRef, ChatInterfaceProps>(
                             throw pollError; // Re-throw to be caught by outer catch
                         }
 
-                        // Update project with new URLs and timestamp to trigger iframe refresh
-                        if (currentProject) {
-                            const updatedProject: GeneratedProject = {
-                                ...currentProject,
-                                previewUrl: result.previewUrl || currentProject.previewUrl,
-                                vercelUrl: result.vercelUrl || currentProject.vercelUrl,
-                                url: result.previewUrl || result.vercelUrl || currentProject.url,
-                                lastUpdated: Date.now(), // Add timestamp to force iframe refresh
-                            };
-                            logger.log('🔄 Updating project with timestamp:', updatedProject.lastUpdated);
-                            onProjectGenerated(updatedProject);
-                        }
-
-                        // Show success message with actual file count
-                        const changedFiles = result.generatedFiles || [];
-                        const elapsedTime = generationStartTimeRef.current 
-                            ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
-                            : undefined;
-                        const successContent = `Changes applied successfully! I've updated ${changedFiles.length} files. The preview should reflect your changes shortly.`;
-                        
-                        setChat(prev => {
-                            const newChat = [...prev];
-                            if (newChat.length > 0 && newChat[newChat.length - 1].role === 'ai') {
-                                newChat[newChat.length - 1].content = successContent;
-                                newChat[newChat.length - 1].changedFiles = changedFiles;
-                                if (elapsedTime !== undefined) {
-                                    newChat[newChat.length - 1].generationTime = elapsedTime;
+                        // Check if deployment failed but files were saved
+                        if (result.deploymentFailed) {
+                            logger.warn('⚠️ Edit deployment failed but files were saved');
+                            
+                            // Still update project so files can be viewed
+                            if (currentProject) {
+                                const updatedProject: GeneratedProject = {
+                                    ...currentProject,
+                                    generatedFiles: result.generatedFiles || currentProject.generatedFiles,
+                                    lastUpdated: Date.now(),
+                                };
+                                logger.log('🔄 Updating project with saved files despite deployment failure');
+                                onProjectGenerated(updatedProject);
+                            }
+                            
+                            // Show deployment failure message with details
+                            const changedFiles = result.generatedFiles || [];
+                            const elapsedTime = generationStartTimeRef.current 
+                                ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                                : undefined;
+                            
+                            let errorContent = `❌ **Deployment Failed**\n\n`;
+                            errorContent += `Your changes have been saved (${changedFiles.length} files), but deployment to Vercel failed:\n\n`;
+                            errorContent += `\`\`\`\n${result.deploymentError?.substring(0, 800) || 'Unknown error'}\n\`\`\`\n\n`;
+                            errorContent += `**Your files are saved** - you can view and edit them in the Code tab.\n`;
+                            errorContent += `Try asking me to "fix the error" or describe what went wrong.`;
+                            
+                            setChat(prev => {
+                                const newChat = [...prev];
+                                if (newChat.length > 0 && newChat[newChat.length - 1].role === 'ai') {
+                                    newChat[newChat.length - 1].content = errorContent;
+                                    newChat[newChat.length - 1].changedFiles = changedFiles;
+                                    if (elapsedTime !== undefined) {
+                                        newChat[newChat.length - 1].generationTime = elapsedTime;
+                                    }
+                                }
+                                return newChat;
+                            });
+                            generationStartTimeRef.current = null;
+                            
+                            // Save deployment failure message to database
+                            if (currentProject?.projectId) {
+                                try {
+                                    await fetch(`/api/projects/${currentProject.projectId}/chat`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+                                        body: JSON.stringify({
+                                            role: 'ai',
+                                            content: errorContent,
+                                            phase: 'editing',
+                                            changedFiles: changedFiles,
+                                            generationTime: elapsedTime
+                                        })
+                                    });
+                                    logger.log('💾 Deployment failure message saved to database');
+                                } catch (error) {
+                                    logger.warn('Failed to save deployment failure message:', error);
                                 }
                             }
-                            return newChat;
-                        });
-                        generationStartTimeRef.current = null;
+                        } else {
+                            // Deployment succeeded - update project with new URLs
+                            if (currentProject) {
+                                const updatedProject: GeneratedProject = {
+                                    ...currentProject,
+                                    previewUrl: result.previewUrl || currentProject.previewUrl,
+                                    vercelUrl: result.vercelUrl || currentProject.vercelUrl,
+                                    url: result.previewUrl || result.vercelUrl || currentProject.url,
+                                    lastUpdated: Date.now(), // Add timestamp to force iframe refresh
+                                };
+                                logger.log('🔄 Updating project with timestamp:', updatedProject.lastUpdated);
+                                onProjectGenerated(updatedProject);
+                            }
 
-                        // Credit capture is handled server-side to prevent double charging
-                        // Invalidate balance query to refresh balance display
-                        queryClient.invalidateQueries({ queryKey: ["balance"] });
+                            // Show success message with actual file count
+                            const changedFiles = result.generatedFiles || [];
+                            const elapsedTime = generationStartTimeRef.current 
+                                ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                                : undefined;
+                            const successContent = `Changes applied successfully! I've updated ${changedFiles.length} files. The preview should reflect your changes shortly.`;
+                            
+                            setChat(prev => {
+                                const newChat = [...prev];
+                                if (newChat.length > 0 && newChat[newChat.length - 1].role === 'ai') {
+                                    newChat[newChat.length - 1].content = successContent;
+                                    newChat[newChat.length - 1].changedFiles = changedFiles;
+                                    if (elapsedTime !== undefined) {
+                                        newChat[newChat.length - 1].generationTime = elapsedTime;
+                                    }
+                                }
+                                return newChat;
+                            });
+                            generationStartTimeRef.current = null;
 
-                        // Save AI success message to database
-                        if (currentProject?.projectId) {
-                            try {
-                                await fetch(`/api/projects/${currentProject.projectId}/chat`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
-                                    body: JSON.stringify({
-                                        role: 'ai',
-                                        content: successContent,
-                                        phase: 'editing',
-                                        changedFiles: changedFiles,
-                                        generationTime: elapsedTime
-                                    })
-                                });
-                                logger.log('💾 AI success message saved to database');
-                            } catch (error) {
-                                logger.warn('Failed to save AI message to database:', error);
+                            // Credit capture is handled server-side to prevent double charging
+                            // Invalidate balance query to refresh balance display
+                            queryClient.invalidateQueries({ queryKey: ["balance"] });
+
+                            // Save AI success message to database
+                            if (currentProject?.projectId) {
+                                try {
+                                    await fetch(`/api/projects/${currentProject.projectId}/chat`, {
+                                        method: 'POST',
+                                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+                                        body: JSON.stringify({
+                                            role: 'ai',
+                                            content: successContent,
+                                            phase: 'editing',
+                                            changedFiles: changedFiles,
+                                            generationTime: elapsedTime
+                                        })
+                                    });
+                                    logger.log('💾 AI success message saved to database');
+                                } catch (error) {
+                                    logger.warn('Failed to save AI message to database:', error);
+                                }
                             }
                         }
                     } else if (updateResponse.ok) {
@@ -784,7 +886,8 @@ Please build this project with all the features and requirements discussed above
     };
 
     // Polling function for async job status
-    const pollJobStatus = async (jobId: string): Promise<GeneratedProject> => {
+    // Returns GeneratedProject with optional deploymentFailed flag
+    const pollJobStatus = async (jobId: string): Promise<GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string }> => {
         const maxAttempts = 80; // Poll for up to ~20 minutes (80 * 15 seconds)
         let attempt = 0;
 
@@ -817,7 +920,7 @@ Please build this project with all the features and requirements discussed above
                         logger.log('✅ Job completed successfully!', job.result);
 
                         // Transform job result to GeneratedProject format
-                        const project: GeneratedProject = {
+                        const project: GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string } = {
                             projectId: job.result.projectId,
                             port: job.result.port,
                             url: job.result.url,
@@ -846,7 +949,32 @@ Please build this project with all the features and requirements discussed above
                             'Job failed - no error details available';
                         
                         logger.error('❌ Final error message to display:', errorMessage);
-                        reject(new Error(errorMessage));
+                        
+                        // Check if the project was created (files saved) even though deployment failed
+                        // This allows users to view and edit the files even when deployment fails
+                        const projectId = job.result?.projectId || job.projectId;
+                        if (projectId) {
+                            logger.log('📦 Project files were saved despite deployment failure, returning partial project data');
+                            
+                            // Return partial project data so the UI can display the files
+                            const partialProject: GeneratedProject & { deploymentFailed?: boolean; deploymentError?: string } = {
+                                projectId: projectId,
+                                port: job.result?.port || 3000,
+                                url: job.result?.previewUrl || job.result?.url || '',
+                                generatedFiles: job.result?.generatedFiles || [],
+                                previewUrl: job.result?.previewUrl,
+                                vercelUrl: job.result?.vercelUrl,
+                                appType: 'farcaster',
+                                isNewDeployment: true,
+                                deploymentFailed: true,
+                                deploymentError: errorMessage,
+                            };
+                            
+                            resolve(partialProject);
+                        } else {
+                            // No project ID means files weren't saved, reject with error
+                            reject(new Error(errorMessage));
+                        }
                     } else if (attempt >= maxAttempts) {
                         clearInterval(pollInterval);
                         reject(new Error('Job polling timeout - generation is taking too long'));
@@ -949,6 +1077,64 @@ Please build this project with all the features and requirements discussed above
                 } catch (pollError) {
                     logger.error('❌ Async job failed:', pollError);
                     throw pollError; // Re-throw to be caught by outer catch block
+                }
+
+                // Check if deployment failed but files were saved
+                if (project.deploymentFailed) {
+                    logger.warn('⚠️ Generation deployment failed but files were saved');
+                    logger.log('📦 Project files saved despite deployment failure:', {
+                        projectId: project.projectId,
+                        filesCount: project.generatedFiles?.length || 0,
+                    });
+                    
+                    // Still update the project state so files can be viewed
+                    onProjectGenerated(project);
+                    setCurrentPhase('editing');
+                    logger.log('✅ Phase set to editing (deployment failed but files saved)');
+                    
+                    // Show deployment failure message
+                    const elapsedTime = generationStartTimeRef.current 
+                        ? Math.round((Date.now() - generationStartTimeRef.current) / 1000)
+                        : undefined;
+                    
+                    let errorContent = `❌ **Deployment Failed**\n\n`;
+                    errorContent += `Your miniapp files have been generated (${project.generatedFiles?.length || 0} files), but deployment to Vercel failed:\n\n`;
+                    errorContent += `\`\`\`\n${project.deploymentError?.substring(0, 800) || 'Unknown error'}\n\`\`\`\n\n`;
+                    errorContent += `**Good news:** Your files are saved! You can view and edit them in the Code tab.\n`;
+                    errorContent += `Ask me to "fix the deployment error" and I'll try to resolve the issue.`;
+                    
+                    const errorMsg: ChatMessage = {
+                        role: 'ai',
+                        content: errorContent,
+                        changedFiles: project.generatedFiles || [],
+                        phase: 'editing',
+                        timestamp: Date.now(),
+                        generationTime: elapsedTime
+                    };
+                    
+                    setChat(prev => [...prev, errorMsg]);
+                    generationStartTimeRef.current = null;
+                    
+                    // Save deployment failure message to database
+                    if (project.projectId) {
+                        try {
+                            await fetch(`/api/projects/${project.projectId}/chat`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${sessionToken}` },
+                                body: JSON.stringify({
+                                    role: 'ai',
+                                    content: errorContent,
+                                    phase: 'editing',
+                                    changedFiles: project.generatedFiles || [],
+                                    generationTime: elapsedTime
+                                })
+                            });
+                        } catch (error) {
+                            logger.warn('Failed to save deployment failure message:', error);
+                        }
+                    }
+                    
+                    return; // Exit early - deployment failed but files saved
                 }
 
                 // Project is now ready, continue with normal flow
