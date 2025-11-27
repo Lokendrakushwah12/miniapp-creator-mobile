@@ -92,6 +92,15 @@ export async function sendNotification(
       return false;
     }
 
+    // The frame URL that users added (where your farcaster.json manifest is hosted)
+    const frameUrl = process.env.NEXT_PUBLIC_APP_URL || 'https://miniapp.minidev.fun';
+    
+    logger.log(`📤 Attempting to send notification via Neynar:`, {
+      targetFid: user.farcasterFid,
+      frameUrl,
+      title,
+    });
+
     try {
       // Use Neynar's publish frame notifications API
       // Ref: https://docs.neynar.com/reference/publish-frame-notifications
@@ -103,6 +112,8 @@ export async function sendNotification(
           'x-api-key': neynarApiKey,
         },
         body: JSON.stringify({
+          // The frame URL identifies which frame/app is sending the notification
+          frame_url: frameUrl,
           target_fids: [user.farcasterFid],
           title,
           body,
@@ -110,21 +121,50 @@ export async function sendNotification(
         }),
       });
 
-      const responseData = await response.json();
+      const responseText = await response.text();
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch {
+        responseData = { raw: responseText };
+      }
+
+      logger.log(`📬 Neynar API response:`, {
+        status: response.status,
+        ok: response.ok,
+        data: responseData,
+      });
 
       if (response.ok) {
-        logger.log(`✅ Notification sent successfully to FID ${user.farcasterFid}`, responseData);
-        return true;
+        // Check if notification was actually delivered
+        const delivered = responseData?.notification?.delivered_to || [];
+        const failed = responseData?.notification?.failed_to || [];
+        
+        if (delivered.length > 0) {
+          logger.log(`✅ Notification delivered to ${delivered.length} user(s):`, delivered);
+          return true;
+        } else if (failed.length > 0) {
+          logger.warn(`⚠️ Notification failed for ${failed.length} user(s):`, failed);
+          logger.warn(`Possible reasons: User hasn't enabled notifications for this frame, or notification token expired`);
+        } else {
+          logger.log(`✅ Notification sent (no delivery details in response)`);
+          return true;
+        }
       } else {
         logger.warn(`⚠️ Neynar notification failed: ${response.status}`, responseData);
         
-        // Common error: User hasn't enabled notifications for this frame
-        if (responseData?.message?.includes('no notification tokens')) {
+        // Common errors
+        if (responseData?.message?.includes('no notification tokens') || 
+            responseData?.message?.includes('No notification tokens')) {
           logger.warn(`⚠️ User ${user.farcasterFid} hasn't enabled notifications for this mini app`);
+          logger.warn(`Make sure user has added the mini app at ${frameUrl} and enabled notifications`);
+        }
+        if (responseData?.message?.includes('invalid') || responseData?.code === 'invalid_request') {
+          logger.error(`❌ Invalid request - check frame_url and API key`);
         }
       }
     } catch (neynarError) {
-      logger.warn(`⚠️ Neynar API error:`, neynarError);
+      logger.error(`⚠️ Neynar API error:`, neynarError);
     }
 
     // If we reach here, notification failed
