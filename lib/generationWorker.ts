@@ -1135,22 +1135,32 @@ async function executeInitialGenerationJob(
     }
 
     // Save files to database (this will replace existing files)
-    const allFiles = await readAllFiles(userDir);
+    const allFilesFromDisk = await readAllFiles(userDir);
 
     // Filter out contracts/ for non-Web3 apps
     const filesToSave = enhancedResult.intentSpec && !enhancedResult.intentSpec.isWeb3
-      ? allFiles.filter(file => {
+      ? allFilesFromDisk.filter(file => {
           const isContractFile = file.filename.startsWith('contracts/');
           if (isContractFile) {
             logger.log(`🗑️ Excluding contract file from database: ${file.filename}`);
           }
           return !isContractFile;
         })
-      : allFiles;
+      : allFilesFromDisk;
 
-    logger.log(`📦 Files to save: ${filesToSave.length} (excluded ${allFiles.length - filesToSave.length} contract files)`);
+    logger.log(`📦 Files to save: ${filesToSave.length} (excluded ${allFilesFromDisk.length - filesToSave.length} contract files)`);
 
-    const safeFiles = filesToSave.filter(file => {
+    // Inject dynamic metadata into layout.tsx with the actual project URL
+    const { processFilesWithMetadata } = await import('./metadataInjector');
+    const filesWithMetadata = processFilesWithMetadata(
+      filesToSave,
+      projectName,
+      `A Farcaster miniapp: ${userRequest.substring(0, 100)}`,
+      projectUrl // Use the actual deployment URL for metadata
+    );
+    logger.log(`✅ Injected dynamic metadata with project URL: ${projectUrl}`);
+
+    const safeFiles = filesWithMetadata.filter(file => {
       if (file.content.includes('\0') || file.content.includes('\x00')) {
         logger.log(`⚠️ Skipping file with null bytes: ${file.filename}`);
         return false;
@@ -1160,6 +1170,26 @@ async function executeInitialGenerationJob(
 
     await saveProjectFiles(project.id, safeFiles);
     logger.log("✅ Project files saved to database successfully");
+    
+    // Redeploy to Vercel with updated metadata (so OG tags are correct when shared)
+    try {
+      logger.log("🔄 Redeploying to Vercel with updated metadata...");
+      const { redeployToVercel } = await import('./previewManager');
+      const redeployResult = await redeployToVercel(
+        projectId,
+        filesWithMetadata,
+        accessToken,
+        appType,
+        enhancedResult.intentSpec?.isWeb3 || false,
+        jobId
+      );
+      if (redeployResult.vercelUrl) {
+        logger.log(`✅ Vercel redeployment successful with updated metadata: ${redeployResult.vercelUrl}`);
+      }
+    } catch (redeployError) {
+      logger.warn("⚠️ Vercel redeployment failed (metadata may not be updated):", redeployError);
+      // Don't fail the job - the initial deployment is still valid
+    }
 
     // If deployment failed, mark job as failed and return early
     if (deploymentFailed) {

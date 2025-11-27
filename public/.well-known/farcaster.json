@@ -4,13 +4,23 @@
     "version": "1",
     "iconUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
     "homeUrl": "https://miniapp.minidev.fun/",
-    "imageUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
+    "description": "Minidev is an AI agent for building Farcaster mini apps, allowing non-technical creators to develop, edit, and launch web3 applications through natural language.",
+    "primaryCategory": "productivity",
+    "subtitle": "build and publish miniapps with AI",
     "splashImageUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
-    "splashBackgroundColor": "#ffffff",
-    "webhookUrl": "https://miniapp.minidev.fun/api/webhook",
-    "subtitle": "my subtitle",
-    "description": "my descrip",
-    "primaryCategory": "social"
+    "splashBackgroundColor": "#7f59cd",
+    "tags": [
+      "ai",
+      "vibecoding",
+      "miniapp",
+      "miniapps",
+      "developer"
+    ],
+    "tagline": "build miniapps with AI",
+    "ogTitle": "minidev - vibecode miniapps",
+    "ogDescription": "build and publish farcaster miniapps with AI",
+    "heroImageUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764246194/META_IMAGE_MINIDEV_gbfqgw.png",
+    "imageUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764246247/photo_2025-11-27_17.53.53_mh8u5h.jpg"
   },
     "accountAssociation": {
     "header": "eyJmaWQiOjExNDY5MzcsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHg1ZTE2ZjlGQjdENDQ3NEJBNTc2YjZkM0FENDhBQzQ0N0QzOEU0NDU0In0",

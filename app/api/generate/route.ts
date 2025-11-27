@@ -10,6 +10,7 @@ import {
   updatePreviewFiles,
   saveFilesToGenerated,
   getPreviewUrl,
+  redeployToVercel,
 } from "../../../lib/previewManager";
 
 // Import the API base URL
@@ -137,7 +138,7 @@ async function fetchWithRetry(
 
 // Utility: Fetch boilerplate from GitHub API
 async function fetchBoilerplateFromGitHub(targetDir: string) {
-  const repoOwner = "chetankashetti";
+  const repoOwner = "Nemil21";
   const repoName = "minidev-boilerplate";
   
   // Fetch repository contents recursively
@@ -881,24 +882,10 @@ export async function POST(request: NextRequest) {
       throw new Error(enhancedResult.error || "Enhanced pipeline failed");
     }
 
-    let generatedFiles = enhancedResult.files.map(f => ({
+    const generatedFiles = enhancedResult.files.map(f => ({
       filename: f.filename,
       content: f.content
     }));
-
-    // Generate project name for metadata injection
-    const projectName = enhancedResult.intentSpec 
-      ? generateProjectName(enhancedResult.intentSpec)
-      : `Project ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-    
-    // Inject dynamic metadata into layout.tsx files
-    const { processFilesWithMetadata } = await import('../../../lib/metadataInjector');
-    generatedFiles = processFilesWithMetadata(
-      generatedFiles,
-      projectName,
-      `A Farcaster miniapp: ${prompt.substring(0, 150)}...`,
-      undefined // baseUrl will be set after deployment
-    );
 
     // Check if the pipeline returned boilerplate files as-is (no changes needed)
     let pipelineResult: { needsChanges: boolean; reason?: string } = {
@@ -1015,38 +1002,33 @@ export async function POST(request: NextRequest) {
     try {
       logger.log("💾 Saving project to database...");
       
-      // Use the project name that was already generated for metadata
-      // (it was generated earlier for metadata injection)
-      const finalProjectName = enhancedResult.intentSpec 
+      // Generate meaningful project name based on LLM-generated intent
+      const projectName = enhancedResult.intentSpec 
         ? generateProjectName(enhancedResult.intentSpec)
         : `Project ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
       
       const project = await createProject(
         user.id, // Use actual user ID from authentication
-        finalProjectName,
+        projectName,
         `AI-generated project: ${userRequest.substring(0, 100)}...`,
         projectUrl,
         projectId, // Pass the custom project ID
         appType // Pass appType from request
       );
       
-      // Update metadata with actual project URL before saving
-      const { processFilesWithMetadata } = await import('../../../lib/metadataInjector');
+      // Read all project files from disk
       const allFilesFromDisk = await readAllFiles(userDir);
+      logger.log(`📁 Found ${allFilesFromDisk.length} files from disk`);
       
-      // Update metadata in layout.tsx with actual project URL
+      // Inject dynamic metadata into layout.tsx with the actual project URL
+      const { processFilesWithMetadata } = await import('../../../lib/metadataInjector');
       const filesWithUpdatedMetadata = processFilesWithMetadata(
         allFilesFromDisk,
-        finalProjectName,
-        `AI-generated project: ${userRequest.substring(0, 100)}...`,
-        projectUrl
+        projectName,
+        `A Farcaster miniapp: ${userRequest.substring(0, 100)}`,
+        projectUrl // Use the actual deployment URL for metadata
       );
-      
-      // Write updated files back to disk
-      await writeFilesToDir(userDir, filesWithUpdatedMetadata);
-      
-      // Save ALL project files to database (boilerplate + generated with updated metadata)
-      logger.log(`📁 Found ${filesWithUpdatedMetadata.length} files to save to database`);
+      logger.log(`✅ Injected dynamic metadata with project URL: ${projectUrl}`);
       
       // Filter out any files that might cause encoding issues
       const safeFiles = filesWithUpdatedMetadata.filter(file => {
@@ -1062,6 +1044,27 @@ export async function POST(request: NextRequest) {
       await saveProjectFiles(project.id, safeFiles);
       
       logger.log("✅ Project saved to database successfully");
+      
+      // Redeploy to Vercel with updated metadata (so OG tags are correct when shared)
+      try {
+        logger.log("🔄 Redeploying to Vercel with updated metadata...");
+        const redeployResult = await redeployToVercel(
+          projectId,
+          filesWithUpdatedMetadata,
+          accessToken,
+          appType,
+          false, // isWeb3
+          undefined // jobId
+        );
+        if (redeployResult.vercelUrl) {
+          logger.log(`✅ Vercel redeployment successful: ${redeployResult.vercelUrl}`);
+          // Update previewData with new Vercel URL if available
+          previewData.vercelUrl = redeployResult.vercelUrl;
+        }
+      } catch (redeployError) {
+        logger.warn("⚠️ Vercel redeployment failed (metadata may not be updated):", redeployError);
+        // Don't fail the request - the initial deployment is still valid
+      }
     } catch (dbError) {
       logger.error("⚠️ Failed to save project to database:", dbError);
       // Don't fail the request if database save fails
