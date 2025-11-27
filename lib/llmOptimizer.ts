@@ -3468,6 +3468,26 @@ async function fixRailwayCompilationErrors(
     return railwayResult.files;
   }
 
+  // Log original content around error lines for debugging (Railway)
+  logger.log("\n[ERROR-FIX-RAILWAY] ORIGINAL FILE CONTENT AROUND ERROR LINES:");
+  for (const file of filesToFix) {
+    const errors = errorsByFile.get(file.filename) || [];
+    logger.log(`[ERROR-FIX-RAILWAY] File: ${file.filename}`);
+    const lines = file.content.split('\n');
+    for (const error of errors) {
+      if (error.line) {
+        const startLine = Math.max(0, error.line - 5);
+        const endLine = Math.min(lines.length, error.line + 5);
+        logger.log(`[ERROR-FIX-RAILWAY]   Error at line ${error.line}: ${error.message}`);
+        logger.log(`[ERROR-FIX-RAILWAY]   Context (lines ${startLine + 1}-${endLine}):`);
+        for (let i = startLine; i < endLine; i++) {
+          const marker = (i + 1 === error.line) ? '>>> ' : '    ';
+          logger.log(`[ERROR-FIX-RAILWAY]   ${marker}${i + 1}: ${lines[i]}`);
+        }
+      }
+    }
+  }
+
   // Create detailed error messages for LLM
   logger.log("\n🔍 Step 5: Creating error messages for LLM...");
   const errorMessages = Array.from(errorsByFile.entries()).map(([file, errors]) => {
@@ -3520,8 +3540,32 @@ async function fixRailwayCompilationErrors(
 
   // Parse and return fixed files
   logger.log("\n🔍 Step 7: Parsing LLM response...");
+  logger.log(`[ERROR-FIX-RAILWAY] LLM response preview (first 1000 chars):`);
+  logger.log(`[ERROR-FIX-RAILWAY] ${fixResponse.substring(0, 1000)}...`);
+  
   const fixedFiles = parseStage4ValidatorResponse(fixResponse);
   logger.log(`  ✅ Parsed ${fixedFiles.length} fixed files from LLM response`);
+  
+  // Log what was parsed for each file (Railway)
+  for (const fixedFile of fixedFiles) {
+    logger.log(`[ERROR-FIX-RAILWAY] Parsed file: ${fixedFile.filename}`);
+    logger.log(`[ERROR-FIX-RAILWAY]   - Has content: ${!!fixedFile.content}`);
+    logger.log(`[ERROR-FIX-RAILWAY]   - Has unifiedDiff: ${!!fixedFile.unifiedDiff}`);
+    if (fixedFile.content) {
+      logger.log(`[ERROR-FIX-RAILWAY]   - Content length: ${fixedFile.content.length} chars`);
+      // Show lines around error (typically line 45 for useRef errors)
+      const lines = fixedFile.content.split('\n');
+      logger.log(`[ERROR-FIX-RAILWAY]   - Total lines: ${lines.length}`);
+      // Show lines 40-50 to see the useRef context
+      logger.log(`[ERROR-FIX-RAILWAY]   - Lines 40-50:`);
+      for (let i = 39; i < Math.min(50, lines.length); i++) {
+        logger.log(`[ERROR-FIX-RAILWAY]     ${i + 1}: ${lines[i]}`);
+      }
+    }
+    if (fixedFile.unifiedDiff) {
+      logger.log(`[ERROR-FIX-RAILWAY]   - Diff preview: ${fixedFile.unifiedDiff.substring(0, 500)}...`);
+    }
+  }
   
   // Merge fixed files with unchanged files
   logger.log("\n🔍 Step 8: Merging fixed and unchanged files...");
@@ -3588,6 +3632,27 @@ async function fixRailwayCompilationErrors(
   logger.log(`  - Original errors: ${railwayResult.errors.length}`);
   logger.log(`  - ABI validation: ${validationResult.isValid ? '✅ Passed' : '⚠️ Issues auto-fixed'}`);
   logger.log("=".repeat(60));
+
+  // Log final content around error lines to verify fix was applied (Railway)
+  logger.log("\n[ERROR-FIX-RAILWAY] FINAL FILE CONTENT AFTER FIX:");
+  for (const [filename, errors] of errorsByFile.entries()) {
+    const finalFile = finalFiles.find(f => f.filename === filename);
+    if (finalFile) {
+      const lines = finalFile.content.split('\n');
+      logger.log(`[ERROR-FIX-RAILWAY] File: ${filename} (${finalFile.content.length} chars)`);
+      for (const error of errors) {
+        if (error.line) {
+          const startLine = Math.max(0, error.line - 5);
+          const endLine = Math.min(lines.length, error.line + 5);
+          logger.log(`[ERROR-FIX-RAILWAY]   Checking around original error line ${error.line}:`);
+          for (let i = startLine; i < endLine; i++) {
+            const marker = (i + 1 === error.line) ? '>>> ' : '    ';
+            logger.log(`[ERROR-FIX-RAILWAY]   ${marker}${i + 1}: ${lines[i]}`);
+          }
+        }
+      }
+    }
+  }
 
   return finalFiles;
 }
@@ -3691,6 +3756,26 @@ async function fixCompilationErrors(
     return compilationResult.files;
   }
 
+  // Log original content around error lines for debugging
+  logger.log("\n[ERROR-FIX] ORIGINAL FILE CONTENT AROUND ERROR LINES:");
+  for (const file of filesToFix) {
+    const errors = errorsByFile.get(file.filename) || [];
+    logger.log(`[ERROR-FIX] File: ${file.filename}`);
+    const lines = file.content.split('\n');
+    for (const error of errors) {
+      if (error.line) {
+        const startLine = Math.max(0, error.line - 5);
+        const endLine = Math.min(lines.length, error.line + 5);
+        logger.log(`[ERROR-FIX]   Error at line ${error.line}: ${error.message}`);
+        logger.log(`[ERROR-FIX]   Context (lines ${startLine + 1}-${endLine}):`);
+        for (let i = startLine; i < endLine; i++) {
+          const marker = (i + 1 === error.line) ? '>>> ' : '    ';
+          logger.log(`[ERROR-FIX]   ${marker}${i + 1}: ${lines[i]}`);
+        }
+      }
+    }
+  }
+
   // Create detailed error messages for LLM
   logger.log("\n🔍 Step 5: Creating error messages for LLM...");
   const errorMessages = Array.from(errorsByFile.entries()).map(([file, errors]) => {
@@ -3737,8 +3822,32 @@ async function fixCompilationErrors(
 
   // Parse and return fixed files
   logger.log("\n🔍 Step 7: Parsing LLM response...");
+  logger.log(`[ERROR-FIX] LLM response preview (first 1000 chars):`);
+  logger.log(`[ERROR-FIX] ${fixResponse.substring(0, 1000)}...`);
+  
   const fixedFiles = parseStage4ValidatorResponse(fixResponse);
   logger.log(`  ✅ Parsed ${fixedFiles.length} fixed files from LLM response`);
+  
+  // Log what was parsed for each file
+  for (const fixedFile of fixedFiles) {
+    logger.log(`[ERROR-FIX] Parsed file: ${fixedFile.filename}`);
+    logger.log(`[ERROR-FIX]   - Has content: ${!!fixedFile.content}`);
+    logger.log(`[ERROR-FIX]   - Has unifiedDiff: ${!!fixedFile.unifiedDiff}`);
+    if (fixedFile.content) {
+      logger.log(`[ERROR-FIX]   - Content length: ${fixedFile.content.length} chars`);
+      // Show lines around error (typically line 45 for useRef errors)
+      const lines = fixedFile.content.split('\n');
+      logger.log(`[ERROR-FIX]   - Total lines: ${lines.length}`);
+      // Show lines 40-50 to see the useRef context
+      logger.log(`[ERROR-FIX]   - Lines 40-50:`);
+      for (let i = 39; i < Math.min(50, lines.length); i++) {
+        logger.log(`[ERROR-FIX]     ${i + 1}: ${lines[i]}`);
+      }
+    }
+    if (fixedFile.unifiedDiff) {
+      logger.log(`[ERROR-FIX]   - Diff preview: ${fixedFile.unifiedDiff.substring(0, 500)}...`);
+    }
+  }
   
   // Merge fixed files with unchanged files
   logger.log("\n🔍 Step 8: Merging fixed and unchanged files...");
@@ -3805,6 +3914,27 @@ async function fixCompilationErrors(
   logger.log(`  - Original errors: ${compilationResult.errors.length}`);
   logger.log(`  - ABI validation: ${validationResult.isValid ? '✅ Passed' : '⚠️ Issues auto-fixed'}`);
   logger.log("=".repeat(60));
+
+  // Log final content around error lines to verify fix was applied
+  logger.log("\n[ERROR-FIX] FINAL FILE CONTENT AFTER FIX:");
+  for (const [filename, errors] of errorsByFile.entries()) {
+    const finalFile = finalFiles.find(f => f.filename === filename);
+    if (finalFile) {
+      const lines = finalFile.content.split('\n');
+      logger.log(`[ERROR-FIX] File: ${filename} (${finalFile.content.length} chars)`);
+      for (const error of errors) {
+        if (error.line) {
+          const startLine = Math.max(0, error.line - 5);
+          const endLine = Math.min(lines.length, error.line + 5);
+          logger.log(`[ERROR-FIX]   Checking around original error line ${error.line}:`);
+          for (let i = startLine; i < endLine; i++) {
+            const marker = (i + 1 === error.line) ? '>>> ' : '    ';
+            logger.log(`[ERROR-FIX]   ${marker}${i + 1}: ${lines[i]}`);
+          }
+        }
+      }
+    }
+  }
 
   return finalFiles;
 }
