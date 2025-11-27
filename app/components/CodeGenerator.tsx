@@ -84,7 +84,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
-                className="px-3 py-1.5 rounded-md transition-colors text-sm font-medium flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700"
+                className="px-3 py-1.5 rounded-full transition-colors text-sm font-medium flex items-center gap-2 bg-gray-100 hover:bg-gray-200 text-gray-700"
                 title={`${viewMode === 'code' ? 'Code' : 'Preview'} view`}
               >
                 {getViewModeIcon(viewMode)}
@@ -115,7 +115,7 @@ export function CodeGenerator({ currentProject, isGenerating = false, onOpenSide
           {viewMode === 'preview' && currentProject && (
             <button
               onClick={() => setPreviewReloadTrigger(prev => prev + 1)}
-              className="p-2 rounded-md transition-colors text-gray-600 hover:text-black hover:bg-gray-100"
+              className="p-2 rounded-full transition-colors text-gray-600 hover:text-black hover:bg-gray-100"
               title="Reload preview"
             >
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

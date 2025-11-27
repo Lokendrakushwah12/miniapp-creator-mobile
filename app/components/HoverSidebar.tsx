@@ -102,7 +102,7 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
               {/* New Project Button */}
               <button
                 onClick={handleNewProject}
-                className="flex items-center justify-center transition-all bg-[#fe6c12] text-white rounded-lg hover:bg-[#f37f37] w-full mx-3 px-3 py-2"
+                className="flex items-center justify-center transition-all bg-[#fe6c12] text-white rounded-full hover:bg-[#f37f37] w-full mx-3 px-3 py-2"
                 title="New Project"
               >
                 <svg className="w-5 h-5 " fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -121,7 +121,7 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
                   <button
                     key={project.id}
                     onClick={() => handleProjectSelect(project)}
-                    className="flex items-center transition-all rounded-lg w-full mx-3 px-3 justify-start"
+                    className="flex items-center transition-all rounded-full w-full mx-3 px-3 justify-start"
                     title={project.name}
                   >
                     {/* <div className="w-8 h-8 rounded-full bg-gradient-to-br from-blue-500 to-cyan-500 flex items-center justify-center flex-shrink-0">
@@ -129,7 +129,7 @@ export const HoverSidebar = forwardRef<HoverSidebarRef, HoverSidebarProps>(
                         {getProjectInitial(project.name)}
                       </span>
                     </div> */}
-                    <div className="flex items-center justify-start hover:bg-gray-200 rounded-lg w-full py-2">
+                    <div className="flex items-center justify-start hover:bg-gray-200 rounded-full w-full py-2">
                     <div className="ml-3 flex-1 text-left overflow-hidden">
                       <p className="text-sm font-medium text-gray-900 truncate">
                         {project.name}
