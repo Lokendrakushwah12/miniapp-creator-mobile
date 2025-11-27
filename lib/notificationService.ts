@@ -80,50 +80,61 @@ export async function sendNotification(
       tokens: [user.farcasterFid.toString()],
     };
 
-    // Send notification via Farcaster's notification API
-    // The notification is sent through Farcaster's notification service
+    // Send notification via Neynar's Frame notification API
+    // See: https://docs.neynar.com/docs/send-notifications-to-mini-app-users
+    // Requires: NEYNAR_API_KEY env variable
+    // Also requires webhookUrl in farcaster.json manifest pointing to:
+    // https://api.neynar.com/f/app/<NEYNAR_CLIENT_ID>/event
     const neynarApiKey = process.env.NEYNAR_API_KEY;
     
-    if (neynarApiKey) {
-      // Use Neynar API for notifications (recommended approach)
-      try {
-        const response = await fetch('https://api.neynar.com/v2/farcaster/frame/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'api_key': neynarApiKey,
-          },
-          body: JSON.stringify({
-            target_fids: [user.farcasterFid],
-            notification: {
-              title,
-              body,
-              target_url: notificationPayload.targetUrl,
-            },
-          }),
-        });
-
-        if (response.ok) {
-          logger.log(`✅ Notification sent successfully to FID ${user.farcasterFid}`);
-          return true;
-        } else {
-          const errorText = await response.text();
-          logger.warn(`⚠️ Neynar notification failed: ${response.status} ${errorText}`);
-        }
-      } catch (neynarError) {
-        logger.warn(`⚠️ Neynar API error:`, neynarError);
-      }
+    if (!neynarApiKey) {
+      logger.warn("⚠️ NEYNAR_API_KEY not configured, skipping notification");
+      return false;
     }
 
-    // Fallback: Log notification for debugging (notifications will show in app)
-    logger.log(`📬 Notification would be sent:`, {
-      fid: user.farcasterFid,
+    try {
+      // Use Neynar's publish frame notifications API
+      // Ref: https://docs.neynar.com/reference/publish-frame-notifications
+      // Neynar manages tokens automatically via the webhookUrl in your manifest
+      const response = await fetch('https://api.neynar.com/v2/farcaster/frame/notifications', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': neynarApiKey,
+        },
+        body: JSON.stringify({
+          target_fids: [user.farcasterFid],
+          title,
+          body,
+          target_url: notificationPayload.targetUrl,
+        }),
+      });
+
+      const responseData = await response.json();
+
+      if (response.ok) {
+        logger.log(`✅ Notification sent successfully to FID ${user.farcasterFid}`, responseData);
+        return true;
+      } else {
+        logger.warn(`⚠️ Neynar notification failed: ${response.status}`, responseData);
+        
+        // Common error: User hasn't enabled notifications for this frame
+        if (responseData?.message?.includes('no notification tokens')) {
+          logger.warn(`⚠️ User ${user.farcasterFid} hasn't enabled notifications for this mini app`);
+        }
+      }
+    } catch (neynarError) {
+      logger.warn(`⚠️ Neynar API error:`, neynarError);
+    }
+
+    // If we reach here, notification failed
+    logger.log(`📬 Notification failed for FID ${user.farcasterFid}:`, {
       title,
       body,
       url: notificationPayload.targetUrl,
     });
 
-    return true;
+    return false;
   } catch (error) {
     logger.error(`❌ Failed to send notification:`, error);
     return false;
