@@ -78,6 +78,13 @@ export const STAGE_MODEL_CONFIG = {
     temperature: 0,
     reason: "Context gathering needs to be fast and efficient",
   },
+  STAGE_COMPLEXITY_ANALYZER: {
+    model: ANTHROPIC_MODELS.FAST,
+    fallbackModel: ANTHROPIC_MODELS.BALANCED,
+    maxTokens: 2000,
+    temperature: 0,
+    reason: "Quick complexity analysis to detect overly complex prompts",
+  },
   STAGE_1_INTENT_PARSER: {
     model: ANTHROPIC_MODELS.FAST,
     fallbackModel: ANTHROPIC_MODELS.BALANCED, // Use Sonnet if Haiku is overloaded
@@ -114,6 +121,297 @@ export const STAGE_MODEL_CONFIG = {
     reason: "Single-stage does everything, needs highest quality",
   },
 } as const;
+
+// ========================================================================
+// PROMPT COMPLEXITY ANALYSIS
+// ========================================================================
+
+/**
+ * Result of prompt complexity analysis
+ */
+export interface PromptComplexityResult {
+  complexityScore: number; // 1-10 scale
+  isComplex: boolean; // true if score > threshold
+  complexFeatures: string[]; // List of detected complex features
+  simplifiedPrompt: string; // A simpler version of the user's request
+  originalIntent: string; // What the user originally wanted
+  simplificationReason: string; // Why we're suggesting simplification
+  v2Features: string[]; // Features that could be added in a future version
+}
+
+/**
+ * Configuration for complexity analysis
+ */
+export interface ComplexityConfig {
+  threshold: number; // Score above which to suggest simplification (default: 7)
+  enableSimplification: boolean; // Whether to automatically suggest simpler versions
+}
+
+const DEFAULT_COMPLEXITY_CONFIG: ComplexityConfig = {
+  threshold: 7,
+  enableSimplification: true,
+};
+
+/**
+ * Get the prompt for analyzing complexity of user requests
+ */
+export function getComplexityAnalyzerPrompt(): string {
+  return `You are an expert at analyzing the complexity of web/mobile app requirements.
+
+TASK: Analyze the user's request and determine its complexity level for a miniapp/webapp generator.
+
+COMPLEXITY INDICATORS (each adds 1-2 points):
+- Multiple distinct features (>3 features): +2
+- External API integrations: +2
+- Real-time features (websockets, live updates): +2
+- Complex blockchain features (multiple contracts, DeFi): +2
+- Multi-user interactions (chat, collaboration): +2
+- File upload/media processing: +1
+- Complex state management: +1
+- Authentication/authorization complexity: +1
+- Complex data relationships: +1
+- Animations/complex UI: +1
+
+SCORING GUIDE:
+- 1-3: Simple (basic CRUD, single feature, localStorage)
+- 4-6: Moderate (2-3 features, basic Web3, simple state)
+- 7-8: Complex (multiple features, external APIs, advanced Web3)
+- 9-10: Very Complex (real-time, multi-contract, complex integrations)
+
+OUTPUT FORMAT (JSON ONLY):
+{
+  "complexityScore": number (1-10),
+  "complexFeatures": ["list of complex features detected"],
+  "originalIntent": "brief description of what user wants",
+  "simplifiedPrompt": "a simpler version that maintains core value",
+  "simplificationReason": "why this simplification helps",
+  "v2Features": ["features that could be added later"]
+}
+
+SIMPLIFICATION GUIDELINES:
+- Keep the CORE VALUE of the user's request
+- Remove features that add complexity without critical value
+- Focus on MVP (Minimum Viable Product)
+- Suggest complex features as "v2" additions
+- Make it buildable in a single miniapp
+
+EXAMPLES:
+
+User: "Create a DeFi app with token swaps, liquidity pools, yield farming, and staking with real-time price charts and portfolio tracking"
+Output:
+{
+  "complexityScore": 9,
+  "complexFeatures": ["multiple DeFi features", "real-time price data", "complex state management", "multiple smart contracts"],
+  "originalIntent": "A comprehensive DeFi platform with trading and investment features",
+  "simplifiedPrompt": "Create a simple token swap app where users can exchange one token for another using a pre-defined liquidity pool",
+  "simplificationReason": "Starting with just token swaps gives users immediate value. Other DeFi features like staking and yield farming can be added once the core swap functionality works reliably.",
+  "v2Features": ["Liquidity pool management", "Yield farming", "Staking", "Real-time price charts", "Portfolio tracking"]
+}
+
+User: "Build a social media app with posts, likes, comments, followers, direct messages, stories, and live streaming"
+Output:
+{
+  "complexityScore": 9,
+  "complexFeatures": ["real-time messaging", "live streaming", "complex social graph", "multiple content types"],
+  "originalIntent": "A full-featured social media platform",
+  "simplifiedPrompt": "Create a simple social feed app where users can post text updates and like/comment on posts",
+  "simplificationReason": "A basic post feed with interactions is the foundation of social apps. Direct messages and stories can be added once the core social experience works well.",
+  "v2Features": ["Direct messaging", "Follower system", "Stories", "Live streaming", "Media uploads"]
+}
+
+User: "Make a todo list app"
+Output:
+{
+  "complexityScore": 2,
+  "complexFeatures": [],
+  "originalIntent": "A simple task management app",
+  "simplifiedPrompt": "Create a todo list app where users can add, complete, and delete tasks",
+  "simplificationReason": "This is already a simple, well-scoped request that is easy to build reliably.",
+  "v2Features": ["Categories", "Due dates", "Reminders", "Sharing"]
+}
+
+REMEMBER: Return ONLY the JSON object. No explanations, no markdown, no code fences.`;
+}
+
+/**
+ * Get the prompt for generating a user-friendly simplification message
+ */
+export function getPromptSimplifierPrompt(): string {
+  return `You are a friendly product advisor helping users build successful miniapps.
+
+TASK: Given a complexity analysis, generate a conversational message that:
+1. Acknowledges the user's vision
+2. Explains why starting simpler is beneficial
+3. Presents the simplified version positively
+4. Lists "future enhancements" as exciting v2 features
+5. Asks if they want to proceed with the simpler version OR the full version
+
+TONE: Friendly, supportive, not condescending. Make the user feel good about building something great.
+
+INPUT: You will receive a JSON complexity analysis.
+
+OUTPUT: A conversational message (plain text, use markdown formatting for readability).
+
+EXAMPLE OUTPUT:
+"I love your vision for a comprehensive DeFi platform! 🚀
+
+To help you launch faster and more reliably, I'd suggest starting with the core feature: **a simple token swap**. This gives your users immediate value and is much more likely to deploy successfully.
+
+**What we'll build:**
+- Clean token swap interface
+- Connect wallet and select tokens
+- Execute swaps with one click
+
+**Future enhancements (v2):**
+- Liquidity pools
+- Yield farming
+- Real-time charts
+- Portfolio tracking
+
+Would you like to:
+1. **Build the simplified version** (recommended for best results)
+2. **Try the full version** (higher risk of build issues)
+
+Just let me know!"`;
+}
+
+/**
+ * Analyze the complexity of a user's prompt
+ * Returns structured complexity analysis
+ */
+export async function analyzePromptComplexity(
+  userPrompt: string,
+  callLLM: (
+    systemPrompt: string,
+    userPrompt: string,
+    stageName: string,
+    stageType?: keyof typeof STAGE_MODEL_CONFIG
+  ) => Promise<string>,
+  config: Partial<ComplexityConfig> = {}
+): Promise<PromptComplexityResult> {
+  const finalConfig = { ...DEFAULT_COMPLEXITY_CONFIG, ...config };
+  
+  logger.log("\n" + "=".repeat(50));
+  logger.log("🔍 COMPLEXITY ANALYZER");
+  logger.log("=".repeat(50));
+  logger.log("📝 Analyzing prompt complexity...");
+  logger.log("📋 User prompt:", userPrompt.substring(0, 200) + (userPrompt.length > 200 ? '...' : ''));
+
+  try {
+    const response = await callLLM(
+      getComplexityAnalyzerPrompt(),
+      `Analyze this user request:\n\n${userPrompt}`,
+      "Complexity Analyzer",
+      "STAGE_COMPLEXITY_ANALYZER"
+    );
+
+    // Parse the JSON response
+    let analysis: {
+      complexityScore: number;
+      complexFeatures: string[];
+      originalIntent: string;
+      simplifiedPrompt: string;
+      simplificationReason: string;
+      v2Features: string[];
+    };
+
+    try {
+      analysis = JSON.parse(response);
+    } catch (parseError) {
+      logger.error("❌ Failed to parse complexity analysis response:", parseError);
+      logger.error("Raw response:", response);
+      
+      // Return a default "not complex" result if parsing fails
+      return {
+        complexityScore: 5,
+        isComplex: false,
+        complexFeatures: [],
+        simplifiedPrompt: userPrompt,
+        originalIntent: userPrompt,
+        simplificationReason: "Unable to analyze complexity, proceeding with original prompt",
+        v2Features: [],
+      };
+    }
+
+    const isComplex = analysis.complexityScore >= finalConfig.threshold;
+
+    logger.log("📊 Complexity Score:", analysis.complexityScore, "/10");
+    logger.log("🔥 Is Complex:", isComplex);
+    logger.log("📋 Complex Features:", analysis.complexFeatures.join(", ") || "None");
+    
+    if (isComplex) {
+      logger.log("💡 Simplified Prompt:", analysis.simplifiedPrompt);
+      logger.log("📝 V2 Features:", analysis.v2Features.join(", "));
+    }
+
+    return {
+      complexityScore: analysis.complexityScore,
+      isComplex,
+      complexFeatures: analysis.complexFeatures,
+      simplifiedPrompt: analysis.simplifiedPrompt,
+      originalIntent: analysis.originalIntent,
+      simplificationReason: analysis.simplificationReason,
+      v2Features: analysis.v2Features,
+    };
+
+  } catch (error) {
+    logger.error("❌ Complexity analysis failed:", error);
+    
+    // Return a default result that allows proceeding
+    return {
+      complexityScore: 5,
+      isComplex: false,
+      complexFeatures: [],
+      simplifiedPrompt: userPrompt,
+      originalIntent: userPrompt,
+      simplificationReason: "Complexity analysis failed, proceeding with original prompt",
+      v2Features: [],
+    };
+  }
+}
+
+/**
+ * Generate a user-friendly simplification suggestion message
+ */
+export async function generateSimplificationMessage(
+  complexityResult: PromptComplexityResult,
+  callLLM: (
+    systemPrompt: string,
+    userPrompt: string,
+    stageName: string,
+    stageType?: keyof typeof STAGE_MODEL_CONFIG
+  ) => Promise<string>
+): Promise<string> {
+  if (!complexityResult.isComplex) {
+    return ""; // No message needed for simple prompts
+  }
+
+  logger.log("📝 Generating simplification message...");
+
+  try {
+    const message = await callLLM(
+      getPromptSimplifierPrompt(),
+      `Generate a friendly message for this complexity analysis:\n\n${JSON.stringify(complexityResult, null, 2)}`,
+      "Simplification Message Generator",
+      "STAGE_COMPLEXITY_ANALYZER"
+    );
+
+    return message;
+  } catch (error) {
+    logger.error("❌ Failed to generate simplification message:", error);
+    
+    // Return a default message
+    return `I noticed your request has quite a few features! To help ensure a successful build, I'd recommend starting with a simpler version:
+
+**Simplified version:** ${complexityResult.simplifiedPrompt}
+
+**Why?** ${complexityResult.simplificationReason}
+
+**Future features (v2):** ${complexityResult.v2Features.join(", ")}
+
+Would you like to build the simplified version, or try the full version?`;
+  }
+}
 
 // Farcaster Miniapp Boilerplate Structure
 const BOILERPLATE_STRUCTURE = `

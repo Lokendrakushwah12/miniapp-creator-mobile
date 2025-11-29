@@ -4,6 +4,12 @@ import { saveChatMessage, createProject, getProjectsByUserId, updateProject } fr
 import { authenticateRequest } from "../../../lib/auth";
 import { db, chatMessages } from "../../../db";
 import { eq } from "drizzle-orm";
+import { 
+  analyzePromptComplexity, 
+  generateSimplificationMessage,
+  STAGE_MODEL_CONFIG,
+  type PromptComplexityResult 
+} from "../../../lib/llmOptimizer";
 
 interface ChatMessage {
   role: "user" | "ai";
@@ -12,6 +18,9 @@ interface ChatMessage {
   phase?: string;
   changedFiles?: string[];
 }
+
+// Track complexity analysis results per session
+const sessionComplexityMap = new Map<string, PromptComplexityResult>();
 
 import { chatSessions } from "../../../lib/chatSessionManager";
 
@@ -254,6 +263,16 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed after ${maxRetries} retries: ${lastError}`);
     }
 
+    // LLM caller for complexity analysis (uses same retry logic)
+    async function callLLMForComplexity(
+      systemPrompt: string,
+      userPrompt: string,
+      _stageName: string,
+      _stageType?: keyof typeof STAGE_MODEL_CONFIG
+    ): Promise<string> {
+      return await retryClaudeCall(systemPrompt, userPrompt, false) as string;
+    }
+
     // Determine the project ID to use
     let currentProjectId = projectId;
     
@@ -392,6 +411,154 @@ export async function POST(request: NextRequest) {
       message, 
       action === "confirm_project" ? "building" : "requirements"
     );
+
+    // Check if user is responding to a complexity suggestion
+    const existingComplexity = sessionComplexityMap.get(currentProjectId);
+    const isRespondingToComplexity = existingComplexity && session.messages.length >= 2;
+    
+    // Handle complexity suggestion responses
+    if (isRespondingToComplexity && !session.projectConfirmed) {
+      const lowerMessage = message.toLowerCase();
+      const wantsSimplified = 
+        lowerMessage.includes("simplified") ||
+        lowerMessage.includes("simple") ||
+        lowerMessage.includes("1") ||
+        lowerMessage.includes("recommended") ||
+        lowerMessage.includes("first") ||
+        lowerMessage.includes("mvp");
+      
+      const wantsFull = 
+        lowerMessage.includes("full") ||
+        lowerMessage.includes("2") ||
+        lowerMessage.includes("original") ||
+        lowerMessage.includes("complete") ||
+        lowerMessage.includes("all features");
+      
+      if (wantsSimplified) {
+        // User wants simplified version - update the conversation to use simplified prompt
+        logger.log("📝 User chose simplified version");
+        
+        const aiResponse = `Great choice! 🎯 Starting with the simplified version will help ensure a smooth build.
+
+**What we're building:** ${existingComplexity.simplifiedPrompt}
+
+This focused approach will give you a working app quickly. Once it's live, we can add the advanced features (${existingComplexity.v2Features.slice(0, 3).join(", ")}${existingComplexity.v2Features.length > 3 ? '...' : ''}) in future updates.
+
+Does this sound good? Just say "yes" or "build" when you're ready to proceed!`;
+
+        await saveMessageToDBAndCache(currentProjectId, "ai", aiResponse, "requirements");
+        
+        // Clear complexity map - we've handled it
+        sessionComplexityMap.delete(currentProjectId);
+
+        if (creditEventId) {
+          await captureCredits(creditEventId);
+        }
+
+        return NextResponse.json({
+          success: true,
+          response: aiResponse,
+          sessionId,
+          projectId: currentProjectId,
+          projectConfirmed: false,
+          messageCount: session.messages.length,
+          usedSimplifiedPrompt: true,
+          simplifiedPrompt: existingComplexity.simplifiedPrompt,
+        });
+      } else if (wantsFull) {
+        // User wants full version - proceed with warning
+        logger.log("⚠️ User chose full version despite complexity warning");
+        
+        const aiResponse = `Alright, let's go for the full version! 💪
+
+**Building:** ${existingComplexity.originalIntent}
+
+Just a heads up - with more features, there's a higher chance we might need to iterate if something doesn't work on the first try. But let's give it a shot!
+
+Ready to proceed? Just say "yes" or "build" when you're ready!`;
+
+        await saveMessageToDBAndCache(currentProjectId, "ai", aiResponse, "requirements");
+        
+        // Clear complexity map
+        sessionComplexityMap.delete(currentProjectId);
+
+        if (creditEventId) {
+          await captureCredits(creditEventId);
+        }
+
+        return NextResponse.json({
+          success: true,
+          response: aiResponse,
+          sessionId,
+          projectId: currentProjectId,
+          projectConfirmed: false,
+          messageCount: session.messages.length,
+          usedFullPrompt: true,
+        });
+      }
+    }
+
+    // Complexity analysis for first message (when conversation just starts)
+    const isFirstMessage = session.messages.filter(m => m.role === 'user').length === 1;
+    const shouldAnalyzeComplexity = isFirstMessage && !session.projectConfirmed && action !== "confirm_project";
+    
+    if (shouldAnalyzeComplexity) {
+      try {
+        logger.log("🔍 Analyzing prompt complexity for first message...");
+        
+        const complexityResult = await analyzePromptComplexity(
+          message,
+          callLLMForComplexity,
+          { threshold: 7, enableSimplification: true }
+        );
+        
+        // If complex, generate simplification message and return it
+        if (complexityResult.isComplex) {
+          logger.log(`⚠️ Complex prompt detected (score: ${complexityResult.complexityScore}/10)`);
+          
+          // Store complexity result for this session
+          sessionComplexityMap.set(currentProjectId, complexityResult);
+          
+          // Generate a friendly simplification message
+          const simplificationMessage = await generateSimplificationMessage(
+            complexityResult,
+            callLLMForComplexity
+          );
+
+          // Save AI response
+          await saveMessageToDBAndCache(
+            currentProjectId,
+            "ai",
+            simplificationMessage,
+            "complexity_check"
+          );
+
+          if (creditEventId) {
+            await captureCredits(creditEventId);
+          }
+
+          return NextResponse.json({
+            success: true,
+            response: simplificationMessage,
+            sessionId,
+            projectId: currentProjectId,
+            projectConfirmed: false,
+            messageCount: session.messages.length,
+            complexityAnalysis: {
+              isComplex: true,
+              score: complexityResult.complexityScore,
+              simplifiedPrompt: complexityResult.simplifiedPrompt,
+              v2Features: complexityResult.v2Features,
+            },
+          });
+        } else {
+          logger.log(`✅ Prompt complexity acceptable (score: ${complexityResult.complexityScore}/10)`);
+        }
+      } catch (complexityError) {
+        logger.warn("⚠️ Complexity analysis failed, proceeding normally:", complexityError);
+        // Continue with normal flow if complexity analysis fails
+      }
+    }
 
     if (stream) {
       const conversationHistory = session.messages

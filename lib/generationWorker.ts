@@ -499,6 +499,274 @@ function getProjectDir(projectId: string): string {
   return path.join(outputDir, projectId);
 }
 
+// ========================================================================
+// LOCAL BUILD VALIDATION LOOP
+// ========================================================================
+
+/**
+ * Configuration for build validation loop
+ */
+interface BuildLoopConfig {
+  maxIterations: number;
+  enableLocalBuildValidation: boolean;
+}
+
+const DEFAULT_BUILD_LOOP_CONFIG: BuildLoopConfig = {
+  maxIterations: 3,
+  enableLocalBuildValidation: true,
+};
+
+/**
+ * Result of build validation loop
+ */
+interface BuildValidationResult {
+  files: { filename: string; content: string }[];
+  buildSuccess: boolean;
+  iterations: number;
+  errors: string[];
+  lastError?: string;
+}
+
+/**
+ * Validate and fix build errors locally before deployment.
+ * This function runs npm run build locally and iterates on fixes
+ * until the build passes or max iterations is reached.
+ */
+async function validateAndFixBuild(
+  files: { filename: string; content: string }[],
+  projectDir: string,
+  callLLM: (
+    systemPrompt: string,
+    userPrompt: string,
+    stageName: string,
+    stageType?: keyof typeof STAGE_MODEL_CONFIG
+  ) => Promise<string>,
+  appType: 'farcaster' | 'web3' = 'farcaster',
+  config: Partial<BuildLoopConfig> = {}
+): Promise<BuildValidationResult> {
+  const finalConfig = { ...DEFAULT_BUILD_LOOP_CONFIG, ...config };
+  
+  logger.log("\n" + "=".repeat(70));
+  logger.log("🔨 LOCAL BUILD VALIDATION LOOP");
+  logger.log("=".repeat(70));
+  logger.log(`📁 Project directory: ${projectDir}`);
+  logger.log(`📝 Files to validate: ${files.length}`);
+  logger.log(`🔄 Max iterations: ${finalConfig.maxIterations}`);
+
+  if (!finalConfig.enableLocalBuildValidation) {
+    logger.log("⏭️ Local build validation disabled, skipping...");
+    return {
+      files,
+      buildSuccess: true, // Assume success if disabled
+      iterations: 0,
+      errors: [],
+    };
+  }
+
+  // Import the CompilationValidator
+  const { CompilationValidator, CompilationErrorUtils } = await import('./compilationValidator');
+  
+  let currentFiles = [...files];
+  let iteration = 0;
+  const allErrors: string[] = [];
+  let lastErrorSignature = '';
+  let consecutiveSameErrors = 0;
+
+  while (iteration < finalConfig.maxIterations) {
+    iteration++;
+    logger.log(`\n📦 Build iteration ${iteration}/${finalConfig.maxIterations}`);
+    
+    // Write current files to project directory
+    await writeFilesToDir(projectDir, currentFiles);
+    
+    // Create validator and run build
+    const validator = new CompilationValidator(projectDir, {
+      enableTypeScript: true,
+      enableBuild: true,
+      enableSolidity: currentFiles.some(f => f.filename.endsWith('.sol')),
+      enableESLint: false, // Skip ESLint as it's ignored in production builds
+      enableRuntimeChecks: true,
+      timeoutMs: 120000, // 2 minutes
+    });
+
+    logger.log("🔍 Running local build validation...");
+    
+    const validationResult = await validator.validateProject(
+      currentFiles.map(f => ({ filename: f.filename, content: f.content, operation: 'create' })),
+      currentFiles
+    );
+
+    logger.log(`📊 Build result: ${validationResult.success ? '✅ SUCCESS' : '❌ FAILED'}`);
+    logger.log(`   Errors: ${validationResult.errors.length}`);
+    logger.log(`   Warnings: ${validationResult.warnings.length}`);
+
+    // If build succeeded, we're done!
+    if (validationResult.success) {
+      logger.log("🎉 Build passed! Proceeding to deployment...");
+      return {
+        files: currentFiles,
+        buildSuccess: true,
+        iterations: iteration,
+        errors: allErrors,
+      };
+    }
+
+    // Check for consecutive same errors (stuck detection)
+    const errorSummary = CompilationErrorUtils.getErrorSummary(validationResult.errors);
+    const currentErrorSignature = JSON.stringify(errorSummary);
+    
+    if (currentErrorSignature === lastErrorSignature) {
+      consecutiveSameErrors++;
+      logger.log(`⚠️ Same errors detected ${consecutiveSameErrors} times in a row`);
+      
+      if (consecutiveSameErrors >= 2) {
+        logger.log("🚫 Stuck on same errors, stopping iteration");
+        return {
+          files: currentFiles,
+          buildSuccess: false,
+          iterations: iteration,
+          errors: allErrors,
+          lastError: validationResult.errors.map(e => `${e.file}:${e.line}: ${e.message}`).join('\n'),
+        };
+      }
+    } else {
+      consecutiveSameErrors = 0;
+      lastErrorSignature = currentErrorSignature;
+    }
+
+    // Collect errors for history
+    const errorMessages = validationResult.errors.map(e => 
+      `${e.file}:${e.line || '?'}: ${e.message}`
+    );
+    allErrors.push(...errorMessages);
+
+    // If this is the last iteration, return failure
+    if (iteration >= finalConfig.maxIterations) {
+      logger.log(`❌ Max iterations (${finalConfig.maxIterations}) reached, stopping`);
+      return {
+        files: currentFiles,
+        buildSuccess: false,
+        iterations: iteration,
+        errors: allErrors,
+        lastError: errorMessages.join('\n'),
+      };
+    }
+
+    // Format errors for LLM
+    logger.log("🤖 Calling LLM to fix build errors...");
+    
+    const errorsByFile = CompilationErrorUtils.groupErrorsByFile(validationResult.errors);
+    const filesToFix: { filename: string; content: string }[] = [];
+    const errorDetails: string[] = [];
+    
+    for (const [filename, errors] of errorsByFile.entries()) {
+      const file = currentFiles.find(f => f.filename === filename);
+      if (file) {
+        filesToFix.push(file);
+        
+        errorDetails.push(`\n### ${filename}`);
+        errorDetails.push(`Errors in this file:`);
+        errors.forEach(err => {
+          errorDetails.push(`  - Line ${err.line || '?'}: ${err.message}`);
+          if (err.suggestion) {
+            errorDetails.push(`    💡 Suggestion: ${err.suggestion}`);
+          }
+        });
+        
+        // Add file content with error lines marked
+        errorDetails.push(`\nFile content (errors marked with >>>):`);
+        const lines = file.content.split('\n');
+        const errorLines = new Set(errors.map(e => (e.line || 1) - 1));
+        lines.forEach((line, idx) => {
+          const marker = errorLines.has(idx) ? '>>> ' : '    ';
+          errorDetails.push(`${marker}${idx + 1}: ${line}`);
+        });
+      }
+    }
+
+    if (filesToFix.length === 0) {
+      logger.log("⚠️ No files identified for fixing, returning current state");
+      return {
+        files: currentFiles,
+        buildSuccess: false,
+        iterations: iteration,
+        errors: allErrors,
+        lastError: errorMessages.join('\n'),
+      };
+    }
+
+    // Import getStage4ValidatorPrompt
+    const { getStage4ValidatorPrompt } = await import('./llmOptimizer');
+    
+    // Create fix prompt
+    const fixPrompt = getStage4ValidatorPrompt(
+      filesToFix,
+      [errorDetails.join('\n')],
+      false, // Use diff-based fixes
+      appType
+    );
+
+    const fixResponse = await callLLM(
+      fixPrompt,
+      "",
+      `Build Fix Iteration ${iteration}`,
+      "STAGE_4_VALIDATOR"
+    );
+
+    logger.log(`📥 Received LLM fix response (${fixResponse.length} chars)`);
+
+    // Parse and apply fixes
+    const { parseStage4ValidatorResponse } = await import('./parserUtils');
+    const { applyDiffsToFiles } = await import('./diffBasedPipeline');
+    
+    try {
+      const fixes = parseStage4ValidatorResponse(fixResponse);
+      logger.log(`✅ Parsed ${fixes.length} fixes from LLM`);
+
+      // Convert to FileDiff format
+      const fileDiffs = fixes
+        .filter(f => f.unifiedDiff && f.diffHunks)
+        .map(f => ({
+          filename: f.filename,
+          hunks: f.diffHunks!,
+          unifiedDiff: f.unifiedDiff!,
+        }));
+
+      if (fileDiffs.length > 0) {
+        // Apply diff-based fixes
+        logger.log(`🔧 Applying ${fileDiffs.length} diff-based fixes...`);
+        currentFiles = applyDiffsToFiles(currentFiles, fileDiffs);
+      } else {
+        // Fallback: Check for full content fixes
+        const fullContentFixes = fixes.filter(f => f.content && !f.unifiedDiff);
+        if (fullContentFixes.length > 0) {
+          logger.log(`📝 Applying ${fullContentFixes.length} full-content fixes...`);
+          currentFiles = currentFiles.map(currentFile => {
+            const fix = fullContentFixes.find(f => f.filename === currentFile.filename);
+            return fix ? { ...currentFile, content: fix.content! } : currentFile;
+          });
+        } else {
+          logger.log("⚠️ No applicable fixes found in LLM response");
+        }
+      }
+
+      logger.log(`✅ Fixes applied, continuing to next iteration...`);
+    } catch (parseError) {
+      logger.error("❌ Failed to parse LLM fix response:", parseError);
+      // Continue to next iteration anyway
+    }
+  }
+
+  // Should not reach here, but just in case
+  return {
+    files: currentFiles,
+    buildSuccess: false,
+    iterations: iteration,
+    errors: allErrors,
+    lastError: "Max iterations reached",
+  };
+}
+
 /**
  * Fix deployment errors by parsing Vercel build logs and calling LLM to fix issues
  */
@@ -934,8 +1202,50 @@ async function executeInitialGenerationJob(
       }
     }
 
+    // LOCAL BUILD VALIDATION: Run npm run build locally before deploying to Vercel
+    // This catches errors early and fixes them before wasting Vercel deployment time
+    logger.log("\n" + "=".repeat(70));
+    logger.log("🔨 PRE-DEPLOYMENT: LOCAL BUILD VALIDATION");
+    logger.log("=".repeat(70) + "\n");
+    
+    try {
+      const buildValidationResult = await validateAndFixBuild(
+        generatedFiles,
+        userDir,
+        callClaudeWithLogging,
+        appType,
+        { maxIterations: 3, enableLocalBuildValidation: true }
+      );
+      
+      logger.log(`📊 Local build validation completed:`);
+      logger.log(`   - Success: ${buildValidationResult.buildSuccess}`);
+      logger.log(`   - Iterations: ${buildValidationResult.iterations}`);
+      logger.log(`   - Errors fixed: ${buildValidationResult.errors.length}`);
+      
+      if (buildValidationResult.buildSuccess) {
+        // Update generatedFiles with the fixed files
+        generatedFiles = buildValidationResult.files;
+        
+        // Save the fixed files to disk and generated directory
+        await writeFilesToDir(userDir, generatedFiles);
+        await saveFilesToGenerated(projectId, generatedFiles);
+        logger.log("✅ Local build passed! Proceeding to Vercel deployment...");
+      } else {
+        logger.warn("⚠️ Local build failed after max iterations, proceeding anyway...");
+        logger.log(`   Last error: ${buildValidationResult.lastError?.substring(0, 200) || 'Unknown'}...`);
+        // Still use the latest files from the build loop (they may be partially fixed)
+        generatedFiles = buildValidationResult.files;
+        await writeFilesToDir(userDir, generatedFiles);
+        await saveFilesToGenerated(projectId, generatedFiles);
+      }
+    } catch (buildError) {
+      logger.error("❌ Local build validation failed with exception:", buildError);
+      logger.log("⚠️ Continuing to Vercel deployment anyway...");
+      // Continue with existing files - Vercel deployment will catch any remaining errors
+    }
+
     // Create preview (now with real contract addresses injected if Web3)
-    logger.log("🚀 Creating preview...");
+    logger.log("\n🚀 Creating Vercel preview...");
     let previewData: Awaited<ReturnType<typeof createPreview>> | undefined;
     let projectUrl: string = `https://${projectId}.${CUSTOM_DOMAIN_BASE}`; // Default fallback URL (custom domain)
     const maxDeploymentRetries = 4; // Allow up to 3 retries with fixes (to detect 3 consecutive same errors)
@@ -1590,19 +1900,53 @@ async function executeFollowUpJob(
     }
   }
 
+  // LOCAL BUILD VALIDATION: Run npm run build locally before deploying
+  logger.log("\n[EDIT-WORKER] ========================================");
+  logger.log("[EDIT-WORKER] PRE-DEPLOYMENT: LOCAL BUILD VALIDATION");
+  logger.log("[EDIT-WORKER] ========================================");
+  
+  let validatedFiles = result.files;
+  
+  try {
+    const buildValidationResult = await validateAndFixBuild(
+      result.files,
+      userDir,
+      callLLM,
+      appType,
+      { maxIterations: 3, enableLocalBuildValidation: true }
+    );
+    
+    logger.log(`[EDIT-WORKER] 📊 Local build validation completed:`);
+    logger.log(`[EDIT-WORKER]    - Success: ${buildValidationResult.buildSuccess}`);
+    logger.log(`[EDIT-WORKER]    - Iterations: ${buildValidationResult.iterations}`);
+    logger.log(`[EDIT-WORKER]    - Errors fixed: ${buildValidationResult.errors.length}`);
+    
+    if (buildValidationResult.buildSuccess) {
+      validatedFiles = buildValidationResult.files;
+      logger.log("[EDIT-WORKER] ✅ Local build passed! Proceeding to Vercel deployment...");
+    } else {
+      logger.warn("[EDIT-WORKER] ⚠️ Local build failed after max iterations, proceeding anyway...");
+      logger.log(`[EDIT-WORKER]    Last error: ${buildValidationResult.lastError?.substring(0, 200) || 'Unknown'}...`);
+      validatedFiles = buildValidationResult.files;
+    }
+  } catch (buildError) {
+    logger.error("[EDIT-WORKER] ❌ Local build validation failed with exception:", buildError);
+    logger.log("[EDIT-WORKER] ⚠️ Continuing to Vercel deployment anyway...");
+  }
+
   // PHASE 1: Write changes to disk
   logger.log("\n[EDIT-WORKER] ========================================");
   logger.log("[EDIT-WORKER] PHASE 1: WRITE TO DISK");
   logger.log("[EDIT-WORKER] ========================================");
-  await writeFilesToDir(userDir, result.files);
-  await saveFilesToGenerated(projectId, result.files);
-  logger.log(`[EDIT-WORKER] ✅ ${result.files.length} files written to disk`);
+  await writeFilesToDir(userDir, validatedFiles);
+  await saveFilesToGenerated(projectId, validatedFiles);
+  logger.log(`[EDIT-WORKER] ✅ ${validatedFiles.length} files written to disk`);
 
   // PHASE 2: Save to database
   logger.log("\n[EDIT-WORKER] ========================================");
   logger.log("[EDIT-WORKER] PHASE 2: SAVE TO DATABASE");
   logger.log("[EDIT-WORKER] ========================================");
-  const safeFiles = result.files.filter(file => {
+  const safeFiles = validatedFiles.filter(file => {
     if (file.content.includes('\0') || file.content.includes('\x00')) {
       logger.log(`[EDIT-WORKER] ⚠️ Skipping file with null bytes: ${file.filename}`);
       return false;
@@ -1619,7 +1963,7 @@ async function executeFollowUpJob(
   logger.log(`[EDIT-WORKER] ✅ Verification: ${savedFilesCheck.length} files now in database`);
 
   // Check if project has contracts (Web3) by looking for contracts directory
-  const hasContracts = result.files.some(f => 
+  const hasContracts = validatedFiles.some(f => 
     f.filename.startsWith('contracts/') && f.filename.endsWith('.sol')
   );
   const isWeb3 = hasContracts; // Whether contracts exist (for potential deployment)
@@ -1628,7 +1972,7 @@ async function executeFollowUpJob(
   logger.log("\n[EDIT-WORKER] ========================================");
   logger.log("[EDIT-WORKER] PHASE 3: DEPLOY TO VERCEL");
   logger.log("[EDIT-WORKER] ========================================");
-  logger.log(`[EDIT-WORKER] Deploying ${result.files.length} files to Vercel...`);
+  logger.log(`[EDIT-WORKER] Deploying ${validatedFiles.length} files to Vercel...`);
   
   let deploymentFailed = false;
   let deploymentError = '';
@@ -1637,7 +1981,7 @@ async function executeFollowUpJob(
     
     const previewData = await redeployToVercel(
       projectId,
-      result.files,
+      validatedFiles,
       accessToken,
       appType, // Use original project's app type for boilerplate
       isWeb3, // Whether contracts exist (not deploying them though - skipContracts=true)
@@ -1704,10 +2048,10 @@ async function executeFollowUpJob(
       deploymentError,
       deploymentFailed: true,
       status: 'deployment_failed',
-      files: result.files.map(f => ({ filename: f.filename })),
+      files: validatedFiles.map(f => ({ filename: f.filename })),
       diffs: hasDiffs ? (result as { diffs: unknown[] }).diffs : [],
       // Include these fields for frontend compatibility
-      generatedFiles: result.files.map(f => f.filename),
+      generatedFiles: validatedFiles.map(f => f.filename),
       previewUrl: getPreviewUrl(projectId),
       url: getPreviewUrl(projectId) || `https://${projectId}.${CUSTOM_DOMAIN_BASE}`,
       port: 3000,
@@ -1734,16 +2078,16 @@ async function executeFollowUpJob(
   }
 
   // Deployment succeeded - update job status to completed
-  const changedFilenames = result.files.map(f => f.filename);
+  const changedFilenames = validatedFiles.map(f => f.filename);
   const jobResult = {
     success: true,
     projectId,
-    files: result.files.map(f => ({ filename: f.filename })),
+    files: validatedFiles.map(f => ({ filename: f.filename })),
     diffs: hasDiffs ? (result as { diffs: unknown[] }).diffs : [],
     changedFiles: changedFilenames,
     generatedFiles: changedFilenames, // Add this for frontend compatibility
     previewUrl: getPreviewUrl(projectId),
-    totalFiles: result.files.length,
+    totalFiles: validatedFiles.length,
     appType, // Include appType for consistency
   };
 
