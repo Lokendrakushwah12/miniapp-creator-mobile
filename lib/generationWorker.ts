@@ -1968,51 +1968,185 @@ async function executeFollowUpJob(
   );
   const isWeb3 = hasContracts; // Whether contracts exist (for potential deployment)
 
-  // PHASE 3: Redeploy to Vercel with updated files
+  // PHASE 3: Redeploy to Vercel with retry loop for error fixing
   logger.log("\n[EDIT-WORKER] ========================================");
-  logger.log("[EDIT-WORKER] PHASE 3: DEPLOY TO VERCEL");
+  logger.log("[EDIT-WORKER] PHASE 3: DEPLOY TO VERCEL (WITH RETRY)");
   logger.log("[EDIT-WORKER] ========================================");
   logger.log(`[EDIT-WORKER] Deploying ${validatedFiles.length} files to Vercel...`);
   
   let deploymentFailed = false;
   let deploymentError = '';
+  let finalVercelUrl: string | undefined;
   
-  try {
-    
-    const previewData = await redeployToVercel(
-      projectId,
-      validatedFiles,
-      accessToken,
-      appType, // Use original project's app type for boilerplate
-      isWeb3, // Whether contracts exist (not deploying them though - skipContracts=true)
-      jobId
-    );
-    
-    logger.log("[EDIT-WORKER] ✅ Vercel deployment successful!");
-    logger.log(`[EDIT-WORKER] 🌐 Vercel URL: ${previewData.vercelUrl || 'N/A'}`);
+  // Retry loop configuration (same as initial generation)
+  const maxDeploymentRetries = 4;
+  let deploymentAttempt = 0;
+  const errorHistory: string[] = [];
+  let consecutiveSameErrorCount = 0;
+  let stuckOnError = false;
+  let deployableFiles = [...validatedFiles];
 
-    // Update project with deployment URL (should be same as initial deployment)
-    // The URL is stored for redundancy/verification, but it should not change
-    // across deployments since we're deploying to the same Vercel project
-    if (previewData.vercelUrl) {
-      const project = await getProjectById(projectId);
-      const urlChanged = project?.vercelUrl !== previewData.vercelUrl;
+  while (deploymentAttempt < maxDeploymentRetries) {
+    deploymentAttempt++;
+    logger.log(`\n[EDIT-WORKER] 📦 Deployment attempt ${deploymentAttempt}/${maxDeploymentRetries}...`);
+    
+    try {
+      const previewData = await redeployToVercel(
+        projectId,
+        deployableFiles,
+        accessToken,
+        appType,
+        isWeb3,
+        jobId
+      );
       
-      if (urlChanged) {
-        logger.log(`[EDIT-WORKER] ⚠️ Vercel URL changed: ${project?.vercelUrl} → ${previewData.vercelUrl}`);
+      // Check if redeployToVercel returned deployment error info
+      if (previewData.deploymentError) {
+        logger.error(`[EDIT-WORKER] ❌ Deployment failed on attempt ${deploymentAttempt}`);
+        logger.log(`[EDIT-WORKER] 📋 Deployment error: ${previewData.deploymentError.substring(0, 500)}...`);
+        
+        // Track consecutive same errors
+        if (errorHistory.length > 0) {
+          const lastError = errorHistory[errorHistory.length - 1];
+          if (areErrorsSimilar(previewData.deploymentError, lastError)) {
+            consecutiveSameErrorCount++;
+            logger.log(`[EDIT-WORKER] 🔄 Same error detected! Consecutive count: ${consecutiveSameErrorCount}`);
+          } else {
+            consecutiveSameErrorCount = 1;
+            logger.log(`[EDIT-WORKER] 🔄 Different error detected, resetting counter`);
+          }
+        } else {
+          consecutiveSameErrorCount = 1;
+        }
+        errorHistory.push(previewData.deploymentError);
+        
+        // Check if stuck on same error
+        if (consecutiveSameErrorCount >= MAX_CONSECUTIVE_SAME_ERROR_RETRIES) {
+          logger.error(`[EDIT-WORKER] 🚫 Stuck on same error after ${consecutiveSameErrorCount} consecutive retries!`);
+          stuckOnError = true;
+          deploymentFailed = true;
+          deploymentError = `Stuck on same error after ${consecutiveSameErrorCount} retries: ${previewData.deploymentError}`;
+          break;
+        }
+        
+        // Update job status for visibility
+        await updateGenerationJobStatus(jobId, 'processing', {
+          status: 'deployment_retry',
+          attempt: deploymentAttempt,
+          maxAttempts: maxDeploymentRetries,
+          consecutiveSameErrorCount,
+          error: previewData.deploymentError.substring(0, 500)
+        });
+        
+        // If not the last attempt, try to fix errors
+        if (deploymentAttempt < maxDeploymentRetries) {
+          logger.log(`[EDIT-WORKER] 🔧 Attempting to fix deployment errors...`);
+          
+          const fixedFiles = await fixDeploymentErrors(
+            previewData.deploymentError,
+            previewData.deploymentLogs || '',
+            deployableFiles,
+            projectId,
+            appType
+          );
+          
+          logger.log(`[EDIT-WORKER] 🔍 fixDeploymentErrors returned ${fixedFiles.length} files`);
+          
+          // Update files with fixes
+          deployableFiles = fixedFiles;
+          
+          // Write fixed files to disk and database
+          await writeFilesToDir(userDir, deployableFiles);
+          await saveFilesToGenerated(projectId, deployableFiles);
+          await saveProjectFiles(projectId, deployableFiles);
+          logger.log("[EDIT-WORKER] ✅ Fixed files saved, retrying deployment...");
+          
+          // Update job status
+          await updateGenerationJobStatus(jobId, 'processing', {
+            status: 'deployment_retrying',
+            attempt: deploymentAttempt + 1,
+            maxAttempts: maxDeploymentRetries,
+            fixesApplied: true
+          });
+          
+          continue; // Retry deployment
+        } else {
+          // Last attempt failed
+          logger.error("[EDIT-WORKER] ❌ All deployment attempts failed");
+          deploymentFailed = true;
+          deploymentError = previewData.deploymentError;
+          break;
+        }
       }
       
-      await updateProject(projectId, {
-        previewUrl: previewData.vercelUrl,
-        vercelUrl: previewData.vercelUrl,
-      });
-      logger.log(`[EDIT-WORKER] ✅ Project URL updated in database: ${previewData.vercelUrl}`);
+      // Deployment succeeded!
+      logger.log("[EDIT-WORKER] ✅ Vercel deployment successful!");
+      logger.log(`[EDIT-WORKER] 🌐 Vercel URL: ${previewData.vercelUrl || 'N/A'}`);
+      finalVercelUrl = previewData.vercelUrl;
+      
+      // Update validatedFiles with any fixes that were applied
+      validatedFiles = deployableFiles;
+
+      // Update project with deployment URL
+      if (previewData.vercelUrl) {
+        const project = await getProjectById(projectId);
+        const urlChanged = project?.vercelUrl !== previewData.vercelUrl;
+        
+        if (urlChanged) {
+          logger.log(`[EDIT-WORKER] ⚠️ Vercel URL changed: ${project?.vercelUrl} → ${previewData.vercelUrl}`);
+        }
+        
+        await updateProject(projectId, {
+          previewUrl: previewData.vercelUrl,
+          vercelUrl: previewData.vercelUrl,
+        });
+        logger.log(`[EDIT-WORKER] ✅ Project URL updated in database: ${previewData.vercelUrl}`);
+      }
+      
+      break; // Exit retry loop on success
+      
+    } catch (deployError) {
+      const errorMessage = deployError instanceof Error ? deployError.message : String(deployError);
+      logger.error(`[EDIT-WORKER] ❌ Deployment exception on attempt ${deploymentAttempt}:`, errorMessage);
+      
+      // Check if it's a timeout/network error that should trigger retry
+      const isRetryableError = 
+        errorMessage.includes('timeout') || 
+        errorMessage.includes('ETIMEDOUT') || 
+        errorMessage.includes('ECONNRESET') ||
+        errorMessage.includes('fetch failed');
+      
+      if (isRetryableError && deploymentAttempt < maxDeploymentRetries) {
+        logger.log(`[EDIT-WORKER] ⏱️ Retryable error detected, retrying...`);
+        await updateGenerationJobStatus(jobId, 'processing', {
+          status: 'deployment_timeout',
+          attempt: deploymentAttempt,
+          maxAttempts: maxDeploymentRetries,
+          error: errorMessage
+        });
+        continue;
+      }
+      
+      // Non-retryable error or last attempt
+      deploymentFailed = true;
+      deploymentError = errorMessage;
+      
+      if (deploymentAttempt >= maxDeploymentRetries) {
+        logger.error("[EDIT-WORKER] ❌ Max deployment attempts reached");
+      }
+      break;
     }
-  } catch (deployError) {
-    deploymentFailed = true;
-    deploymentError = deployError instanceof Error ? deployError.message : String(deployError);
-    logger.error("[EDIT-WORKER] ❌ Vercel deployment failed:", deploymentError);
-    logger.warn("[EDIT-WORKER] ⚠️ Files are saved to database, but Vercel deployment failed");
+  }
+
+  // Log final deployment status
+  if (!deploymentFailed) {
+    logger.log(`[EDIT-WORKER] 🎉 Deployment succeeded after ${deploymentAttempt} attempt(s)`);
+  } else {
+    logger.error(`[EDIT-WORKER] ❌ Deployment failed after ${deploymentAttempt} attempt(s)`);
+    logger.log(`[EDIT-WORKER] 📋 Final error: ${deploymentError.substring(0, 300)}...`);
+    if (stuckOnError) {
+      logger.log(`[EDIT-WORKER] 🔄 Was stuck on same error: YES`);
+    }
   }
 
   // Store patch for rollback (if diffs available and deployment succeeded)
@@ -2086,9 +2220,11 @@ async function executeFollowUpJob(
     diffs: hasDiffs ? (result as { diffs: unknown[] }).diffs : [],
     changedFiles: changedFilenames,
     generatedFiles: changedFilenames, // Add this for frontend compatibility
-    previewUrl: getPreviewUrl(projectId),
+    previewUrl: finalVercelUrl || getPreviewUrl(projectId),
+    vercelUrl: finalVercelUrl, // Include the Vercel URL from deployment
     totalFiles: validatedFiles.length,
     appType, // Include appType for consistency
+    deploymentAttempts: deploymentAttempt, // Track how many attempts it took
   };
 
   logger.log(`📝 Updating follow-up job ${jobId} status to completed`);
