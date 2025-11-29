@@ -267,9 +267,13 @@ export async function POST(request: NextRequest) {
     async function callLLMForComplexity(
       systemPrompt: string,
       userPrompt: string,
-      _stageName: string,
-      _stageType?: keyof typeof STAGE_MODEL_CONFIG
+      stageName: string,
+      stageType?: keyof typeof STAGE_MODEL_CONFIG
     ): Promise<string> {
+      // stageName and stageType are part of the interface but not used here
+      // They're used by the main LLM caller in llmOptimizer.ts for model selection
+      void stageName;
+      void stageType;
       return await retryClaudeCall(systemPrompt, userPrompt, false) as string;
     }
 
