@@ -768,6 +768,116 @@ async function validateAndFixBuild(
 }
 
 /**
+ * Interface for search-replace fix result
+ */
+interface SearchReplaceResult {
+  content: string;
+  applied: number;
+  failed: { old_string: string; reason: string }[];
+}
+
+/**
+ * Apply search-replace fixes to file content
+ * More reliable than diff-based approach as it uses exact string matching
+ */
+function applySearchReplaceFixes(
+  content: string,
+  fixes: { old_string: string; new_string: string; description?: string }[]
+): SearchReplaceResult {
+  let currentContent = content;
+  let applied = 0;
+  const failed: { old_string: string; reason: string }[] = [];
+
+  for (const fix of fixes) {
+    // Skip empty fixes
+    if (!fix.old_string || fix.old_string === fix.new_string) {
+      logger.log(`⚠️ Skipping invalid fix: old_string empty or same as new_string`);
+      continue;
+    }
+
+    // Check if old_string exists in content
+    if (currentContent.includes(fix.old_string)) {
+      // Apply the fix
+      currentContent = currentContent.replace(fix.old_string, fix.new_string);
+      applied++;
+      logger.log(`✅ Applied fix: "${fix.old_string.substring(0, 50)}..." → "${fix.new_string.substring(0, 50)}..."`);
+      if (fix.description) {
+        logger.log(`   📝 ${fix.description}`);
+      }
+    } else {
+      // Try with normalized whitespace (trim lines and collapse multiple spaces)
+      const normalizedOld = fix.old_string.split('\n').map(l => l.trim()).join('\n').replace(/\s+/g, ' ');
+      const lines = currentContent.split('\n');
+      let foundMatch = false;
+
+      // Try to find a fuzzy match
+      for (let i = 0; i < lines.length; i++) {
+        const windowSize = fix.old_string.split('\n').length;
+        const window = lines.slice(i, i + windowSize).join('\n');
+        const normalizedWindow = window.split('\n').map(l => l.trim()).join('\n').replace(/\s+/g, ' ');
+
+        if (normalizedWindow === normalizedOld) {
+          // Found a match with different whitespace - apply fix
+          currentContent = currentContent.replace(window, fix.new_string);
+          applied++;
+          foundMatch = true;
+          logger.log(`✅ Applied fix with whitespace normalization: "${fix.old_string.substring(0, 50)}..."`);
+          break;
+        }
+      }
+
+      if (!foundMatch) {
+        failed.push({
+          old_string: fix.old_string,
+          reason: 'String not found in file content'
+        });
+        logger.log(`❌ Failed to apply fix: "${fix.old_string.substring(0, 80)}..." - not found in file`);
+      }
+    }
+  }
+
+  return {
+    content: currentContent,
+    applied,
+    failed
+  };
+}
+
+/**
+ * Parse search-replace response from LLM
+ */
+function parseSearchReplaceResponse(response: string): { filename: string; fixes: { old_string: string; new_string: string; description?: string }[] }[] {
+  // Extract JSON between markers
+  const startMarker = '__START_JSON__';
+  const endMarker = '__END_JSON__';
+  const startIdx = response.indexOf(startMarker);
+  const endIdx = response.indexOf(endMarker);
+
+  let jsonStr = response;
+  if (startIdx !== -1 && endIdx !== -1) {
+    jsonStr = response.slice(startIdx + startMarker.length, endIdx).trim();
+  } else {
+    // Try to find JSON array directly
+    const arrayMatch = response.match(/\[\s*\{[\s\S]*\}\s*\]/);
+    if (arrayMatch) {
+      jsonStr = arrayMatch[0];
+    }
+  }
+
+  try {
+    const parsed = JSON.parse(jsonStr);
+    if (Array.isArray(parsed)) {
+      return parsed;
+    }
+    throw new Error('Response is not an array');
+  } catch (error) {
+    logger.error('Failed to parse search-replace response:', error);
+    logger.log('Raw response:', response.substring(0, 500));
+    return [];
+  }
+}
+
+/**
  * Fix deployment errors by parsing Vercel build logs and calling LLM to fix issues
  */
 async function fixDeploymentErrors(
@@ -816,63 +926,108 @@ async function fixDeploymentErrors(
   logger.log("\n📋 Error summary for LLM:");
   logger.log(errorMessage);
 
-  // Import getStage4ValidatorPrompt from llmOptimizer
-  const { getStage4ValidatorPrompt } = await import('./llmOptimizer');
+  // Import prompts from llmOptimizer
+  const { getSearchReplaceFixPrompt, getStage4ValidatorPrompt } = await import('./llmOptimizer');
   
-  // Create LLM prompt to fix errors
-  const fixPrompt = getStage4ValidatorPrompt(
+  // Convert parsed errors to the format expected by getSearchReplaceFixPrompt
+  const errorDetails = parsed.errors.map(e => ({
+    file: e.file || '',
+    line: e.line,
+    message: e.message
+  }));
+
+  // ===== APPROACH 1: Search-Replace (Primary - Most Reliable) =====
+  logger.log("\n🔧 APPROACH 1: Using search-replace method...");
+  
+  const searchReplacePrompt = getSearchReplaceFixPrompt(
+    filesToFix,
+    errorDetails,
+    appType
+  );
+  
+  logger.log(`🤖 Calling LLM with search-replace prompt (${searchReplacePrompt.length} chars)...`);
+  
+  const searchReplaceResponse = await callClaudeWithLogging(
+    searchReplacePrompt,
+    "",
+    "Stage 4: Search-Replace Error Fixes",
+    "STAGE_4_VALIDATOR"
+  );
+  
+  logger.log(`📄 Search-replace response received (${searchReplaceResponse.length} chars)`);
+  logger.log(`🔍 Response preview:\n${searchReplaceResponse.substring(0, 500)}`);
+  
+  // Parse and apply search-replace fixes
+  const searchReplaceFixes = parseSearchReplaceResponse(searchReplaceResponse);
+  logger.log(`✅ Parsed ${searchReplaceFixes.length} file fix entries`);
+  
+  let totalApplied = 0;
+  let totalFailed = 0;
+  const resultFiles = [...currentFiles];
+  
+  for (const fileFix of searchReplaceFixes) {
+    const fileIdx = resultFiles.findIndex(f => 
+      f.filename === fileFix.filename ||
+      f.filename.endsWith(fileFix.filename) ||
+      fileFix.filename.endsWith(f.filename)
+    );
+    
+    if (fileIdx === -1) {
+      logger.log(`⚠️ File not found for fix: ${fileFix.filename}`);
+      continue;
+    }
+    
+    logger.log(`\n🔧 Applying ${fileFix.fixes.length} fixes to ${resultFiles[fileIdx].filename}...`);
+    
+    const result = applySearchReplaceFixes(resultFiles[fileIdx].content, fileFix.fixes);
+    resultFiles[fileIdx] = { ...resultFiles[fileIdx], content: result.content };
+    
+    totalApplied += result.applied;
+    totalFailed += result.failed.length;
+    
+    if (result.failed.length > 0) {
+      logger.log(`⚠️ ${result.failed.length} fixes failed for ${fileFix.filename}`);
+    }
+  }
+  
+  logger.log(`\n📊 Search-replace results: ${totalApplied} applied, ${totalFailed} failed`);
+  
+  // Check if any files actually changed
+  const searchReplaceChanged = resultFiles.some((f, idx) => 
+    f.content !== currentFiles[idx].content
+  );
+  
+  if (searchReplaceChanged) {
+    logger.log("✅ Search-replace fixes applied successfully!");
+    return resultFiles;
+  }
+  
+  logger.log("⚠️ Search-replace did not change any files, trying fallback approaches...");
+
+  // ===== APPROACH 2: Diff-based (Fallback) =====
+  logger.log("\n🔧 APPROACH 2: Trying diff-based method...");
+  
+  const diffPrompt = getStage4ValidatorPrompt(
     filesToFix,
     [errorMessage],
-    false, // Use diff-based fixes, not complete file rewrites
-    appType // Pass app type for correct context
+    false,
+    appType
   );
 
-  logger.log(`\n🤖 Calling LLM to fix deployment errors...`);
-  logger.log(`🔍 [FIX-DEBUG] LLM prompt length: ${fixPrompt.length} chars`);
-  logger.log(`🔍 [FIX-DEBUG] Using diff-based fixes: true`);
-  
-  const fixResponse = await callClaudeWithLogging(
-    fixPrompt,
+  const diffResponse = await callClaudeWithLogging(
+    diffPrompt,
     "",
-    "Stage 4: Deployment Error Fixes",
+    "Stage 4: Diff-based Error Fixes",
     "STAGE_4_VALIDATOR"
   );
 
-  logger.log(`🔍 [FIX-DEBUG] LLM response received, length: ${fixResponse.length} chars`);
-  logger.log(`🔍 [FIX-DEBUG] Response preview (first 500 chars):\n${fixResponse.substring(0, 500)}`);
-
-  // Log the response for debugging
-  logger.log(`📊 [${projectId}] Stage 4 Deployment Error Fixes:`, {
-    errorCount: parsed.errors.length,
-    filesToFix: filesToFix.length,
-    responseLength: fixResponse.length,
-  });
-  logger.log(`🔍 [FIX-DEBUG] Response logged to stage4-deployment-error-fixes`);
-
-  // Parse LLM response
   const { parseStage4ValidatorResponse } = await import('./parserUtils');
   const { applyDiffsToFiles } = await import('./diffBasedPipeline');
   
   try {
-    const fixes = parseStage4ValidatorResponse(fixResponse);
-    logger.log(`✅ Parsed ${fixes.length} fixes from LLM`);
-    
-    // Log what we got from the LLM
-    fixes.forEach((fix, idx) => {
-      logger.log(`\n📄 Fix ${idx + 1}: ${fix.filename}`);
-      logger.log(`   - Has unifiedDiff: ${!!fix.unifiedDiff}`);
-      logger.log(`   - Has diffHunks: ${!!fix.diffHunks}`);
-      logger.log(`   - Has content: ${!!fix.content}`);
-      if (fix.unifiedDiff) {
-        logger.log(`   - Diff length: ${fix.unifiedDiff.length} chars`);
-        logger.log(`   - Diff preview: ${fix.unifiedDiff.substring(0, 200)}...`);
-      }
-      if (fix.diffHunks) {
-        logger.log(`   - Number of hunks: ${fix.diffHunks.length}`);
-      }
-    });
+    const fixes = parseStage4ValidatorResponse(diffResponse);
+    logger.log(`✅ Parsed ${fixes.length} diff fixes from LLM`);
 
-    // Convert to FileDiff format (diffHunks -> hunks)
     const fileDiffs = fixes
       .filter(f => f.unifiedDiff && f.diffHunks)
       .map(f => ({
@@ -881,105 +1036,85 @@ async function fixDeploymentErrors(
         unifiedDiff: f.unifiedDiff!,
       }));
 
-    logger.log(`\n🔍 Filtered to ${fileDiffs.length} files with valid diffs (from ${fixes.length} total)`);
-
-    if (fileDiffs.length === 0) {
-      logger.log("⚠️ No diff-based fixes found, returning original files");
-      logger.log("💡 LLM may have returned full file content instead of diffs");
+    if (fileDiffs.length > 0) {
+      const modifiedFiles = applyDiffsToFiles(currentFiles, fileDiffs);
       
-      // Fallback: If LLM returned full content instead of diffs, use that
-      const fullContentFixes = fixes.filter(f => f.content && !f.unifiedDiff);
-      if (fullContentFixes.length > 0) {
-        logger.log(`📝 Found ${fullContentFixes.length} full-content fixes, applying those instead`);
-        const updatedFiles = currentFiles.map(currentFile => {
-          const fix = fullContentFixes.find(f => f.filename === currentFile.filename);
-          return fix ? { ...currentFile, content: fix.content! } : currentFile;
-        });
+      const modifiedFileNames = new Set(modifiedFiles.map(f => f.filename));
+      const unchangedFiles = currentFiles.filter(f => !modifiedFileNames.has(f.filename));
+      const allFiles = [...modifiedFiles, ...unchangedFiles];
+
+      const diffChanged = modifiedFiles.some(modified => {
+        const original = currentFiles.find(f => f.filename === modified.filename);
+        return original && original.content !== modified.content;
+      });
+
+      if (diffChanged) {
+        logger.log("✅ Diff-based fixes applied successfully!");
+        return allFiles;
+      }
+    }
+    
+    // Try full content from diff response
+    const fullContentFixes = fixes.filter(f => f.content && !f.unifiedDiff);
+    if (fullContentFixes.length > 0) {
+      const updatedFiles = currentFiles.map(currentFile => {
+        const fix = fullContentFixes.find(f => f.filename === currentFile.filename);
+        return fix ? { ...currentFile, content: fix.content! } : currentFile;
+      });
+      
+      const contentChanged = updatedFiles.some((f, idx) => f.content !== currentFiles[idx].content);
+      if (contentChanged) {
+        logger.log("✅ Full content fixes from diff response applied!");
         return updatedFiles;
       }
-      
-      return currentFiles;
     }
-
-    // Apply fixes to current files
-    logger.log(`\n🔧 Applying diffs to files...`);
-    const modifiedFiles = applyDiffsToFiles(currentFiles, fileDiffs);
-    logger.log(`✅ Applied fixes to ${modifiedFiles.length} files`);
-
-    // Merge modified files with unchanged files
-    // applyDiffsToFiles only returns files that were modified, so we need to include unchanged files
-    const modifiedFileNames = new Set(modifiedFiles.map(f => f.filename));
-    const unchangedFiles = currentFiles.filter(f => !modifiedFileNames.has(f.filename));
-    const allFiles = [...modifiedFiles, ...unchangedFiles];
-    
-    logger.log(`📊 Merged result: ${modifiedFiles.length} modified + ${unchangedFiles.length} unchanged = ${allFiles.length} total files`);
-
-    // Check if any files actually changed content
-    const filesActuallyChanged = modifiedFiles.some(modified => {
-      const original = currentFiles.find(f => f.filename === modified.filename);
-      return original && original.content !== modified.content;
-    });
-
-    if (!filesActuallyChanged) {
-      logger.log("⚠️ No files actually changed after diff application - falling back to full file rewrite");
-      
-      // Fallback: Request full file content from LLM instead of diffs
-      const fullRewritePrompt = getStage4ValidatorPrompt(
-        filesToFix,
-        [errorMessage],
-        true,  // Request complete file content
-        appType
-      );
-      
-      logger.log(`🔄 Retrying with full file rewrite prompt...`);
-      
-      const fullResponse = await callClaudeWithLogging(
-        fullRewritePrompt,
-        "",
-        "Stage 4: Deployment Error Fixes (Full Rewrite)",
-        "STAGE_4_VALIDATOR"
-      );
-      
-      logger.log(`📄 Full rewrite response received, length: ${fullResponse.length} chars`);
-      
-      try {
-        const fullFixes = parseStage4ValidatorResponse(fullResponse);
-        logger.log(`✅ Parsed ${fullFixes.length} full file fixes from LLM`);
-        
-        if (fullFixes.length > 0) {
-          // Apply full content fixes
-          const rewrittenFiles = currentFiles.map(currentFile => {
-            const fix = fullFixes.find(f => f.filename === currentFile.filename);
-            if (fix && fix.content) {
-              logger.log(`📝 Applying full rewrite to: ${fix.filename}`);
-              return { ...currentFile, content: fix.content };
-            }
-            return currentFile;
-          });
-          
-          const rewriteChanges = rewrittenFiles.filter((f, idx) => f.content !== currentFiles[idx].content);
-          logger.log(`✅ Full rewrite applied to ${rewriteChanges.length} files`);
-          
-          return rewrittenFiles;
-        }
-      } catch (fullRewriteError) {
-        logger.error("❌ Full rewrite fallback also failed:", fullRewriteError);
-      }
-      
-      // If full rewrite also fails, return the original files
-      logger.log("⚠️ Full rewrite fallback did not produce changes, returning original files");
-      return currentFiles;
-    } else {
-      logger.log("✅ Files were successfully modified");
-    }
-
-    return allFiles;
-  } catch (parseError) {
-    logger.error("❌ Failed to parse LLM fix response:", parseError);
-    logger.error("Stack trace:", parseError instanceof Error ? parseError.stack : 'No stack trace');
-    logger.log("📋 Returning original files");
-    return currentFiles;
+  } catch (diffError) {
+    logger.error("❌ Diff-based approach failed:", diffError);
   }
+
+  // ===== APPROACH 3: Full File Rewrite (Last Resort) =====
+  logger.log("\n🔧 APPROACH 3: Trying full file rewrite...");
+  
+  const fullRewritePrompt = getStage4ValidatorPrompt(
+    filesToFix,
+    [errorMessage],
+    true,
+    appType
+  );
+  
+  const fullResponse = await callClaudeWithLogging(
+    fullRewritePrompt,
+    "",
+    "Stage 4: Full File Rewrite",
+    "STAGE_4_VALIDATOR"
+  );
+  
+  try {
+    const fullFixes = parseStage4ValidatorResponse(fullResponse);
+    logger.log(`✅ Parsed ${fullFixes.length} full file fixes`);
+    
+    if (fullFixes.length > 0) {
+      const rewrittenFiles = currentFiles.map(currentFile => {
+        const fix = fullFixes.find(f => f.filename === currentFile.filename);
+        if (fix && fix.content) {
+          logger.log(`📝 Applying full rewrite to: ${fix.filename}`);
+          return { ...currentFile, content: fix.content };
+        }
+        return currentFile;
+      });
+      
+      const rewriteChanged = rewrittenFiles.some((f, idx) => f.content !== currentFiles[idx].content);
+      if (rewriteChanged) {
+        logger.log("✅ Full file rewrite applied successfully!");
+        return rewrittenFiles;
+      }
+    }
+  } catch (fullRewriteError) {
+    logger.error("❌ Full rewrite approach failed:", fullRewriteError);
+  }
+  
+  logger.log("⚠️ All fix approaches failed, returning original files");
+  return currentFiles;
 }
 
 /**

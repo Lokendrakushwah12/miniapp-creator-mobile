@@ -2315,6 +2315,157 @@ CRITICAL: Return ONLY the JSON array above surrounded by __START_JSON__ and __EN
 `;
 }
 
+/**
+ * Interface for search-replace fix results
+ */
+export interface SearchReplaceFix {
+  filename: string;
+  fixes: {
+    old_string: string;
+    new_string: string;
+    description?: string;
+  }[];
+}
+
+/**
+ * Extract context around a specific line in file content
+ */
+function extractContextAroundLine(
+  content: string,
+  errorLine: number,
+  contextLines: number = 20
+): { context: string; startLine: number; endLine: number } {
+  const lines = content.split('\n');
+  const startLine = Math.max(1, errorLine - contextLines);
+  const endLine = Math.min(lines.length, errorLine + contextLines);
+  
+  const contextWithLineNumbers = lines
+    .slice(startLine - 1, endLine)
+    .map((line, idx) => {
+      const lineNum = startLine + idx;
+      const marker = lineNum === errorLine ? ' >>> ' : '     ';
+      return `${lineNum.toString().padStart(4)}${marker}${line}`;
+    })
+    .join('\n');
+  
+  return {
+    context: contextWithLineNumbers,
+    startLine,
+    endLine
+  };
+}
+
+/**
+ * Generate a prompt for search-replace based error fixing
+ * This approach is more reliable than diff-based fixing as it uses exact string matching
+ */
+export function getSearchReplaceFixPrompt(
+  files: { filename: string; content: string }[],
+  errors: { file: string; line?: number; message: string }[],
+  appType: 'farcaster' | 'web3' = 'farcaster'
+): string {
+  const context = getContextForAppType(appType);
+  
+  // Build error context with surrounding lines
+  const errorContexts: string[] = [];
+  
+  for (const error of errors) {
+    const file = files.find(f => 
+      f.filename === error.file || 
+      f.filename.endsWith(error.file) ||
+      error.file.endsWith(f.filename)
+    );
+    
+    if (file && error.line) {
+      const { context: lineContext, startLine, endLine } = extractContextAroundLine(
+        file.content,
+        error.line,
+        20  // 20 lines of context
+      );
+      
+      errorContexts.push(`
+ERROR IN: ${file.filename}
+LINE: ${error.line}
+MESSAGE: ${error.message}
+
+CODE CONTEXT (lines ${startLine}-${endLine}):
+\`\`\`
+${lineContext}
+\`\`\`
+`);
+    } else if (file) {
+      // No line number, show first 50 lines
+      const preview = file.content.split('\n').slice(0, 50).join('\n');
+      errorContexts.push(`
+ERROR IN: ${file.filename}
+MESSAGE: ${error.message}
+
+FILE PREVIEW (first 50 lines):
+\`\`\`
+${preview}
+\`\`\`
+`);
+    } else {
+      errorContexts.push(`
+ERROR: ${error.message}
+FILE: ${error.file || 'Unknown'}
+LINE: ${error.line || 'Unknown'}
+`);
+    }
+  }
+
+  return `You are a code fixing assistant. Your task is to fix deployment errors using SEARCH-REPLACE pairs.
+
+ERRORS TO FIX:
+${errorContexts.join('\n---\n')}
+
+FULL FILES FOR REFERENCE:
+${files.map(f => `---${f.filename}---\n${f.content}`).join('\n\n')}
+
+BOILERPLATE CONTEXT:
+${JSON.stringify(context, null, 2)}
+
+YOUR TASK:
+Generate search-replace pairs to fix the errors. Each fix should:
+1. Have an \`old_string\` that EXACTLY matches text in the file (including whitespace/indentation)
+2. Have a \`new_string\` with the corrected code
+3. Be minimal - only change what's necessary to fix the error
+
+COMMON FIXES:
+- Type 'unknown' not assignable to ReactNode → Wrap with String() or add type assertion
+- Property does not exist → Add proper typing or optional chaining
+- Unused variables → Remove or prefix with underscore
+- Missing imports → Add the import statement
+- Unescaped entities → Use HTML entities (&apos; &quot; etc.)
+
+OUTPUT FORMAT:
+Return ONLY a JSON array surrounded by __START_JSON__ and __END_JSON__ markers:
+
+__START_JSON__
+[
+  {
+    "filename": "src/components/Example.tsx",
+    "fixes": [
+      {
+        "old_string": "{cast.error.details && (",
+        "new_string": "{cast.error.details && String(",
+        "description": "Wrap unknown type with String() to make it a valid ReactNode"
+      }
+    ]
+  }
+]
+__END_JSON__
+
+CRITICAL RULES:
+1. old_string MUST be an EXACT match including all whitespace and indentation
+2. Include enough context in old_string to make it unique (usually 1-3 lines)
+3. Keep fixes minimal - don't rewrite more than necessary
+4. If multiple fixes needed for same file, include all in the fixes array
+5. Return ONLY the JSON - no explanations before or after
+
+Return the JSON now:`;
+}
+
 // Helper function to get boilerplate context
 // Helper to get the right context based on app type
 function getContextForAppType(appType: 'farcaster' | 'web3' = 'farcaster') {
