@@ -91,8 +91,11 @@ export function DevelopmentLogs({
   onComplete,
   generationId,
 }: DevelopmentLogsProps) {
+  // Track the last generationId to detect changes
+  const lastGenerationIdRef = useRef<number | undefined>(generationId);
+  
   // Initialize state - check if we should resume or start fresh
-  const [startTime] = useState<number>(() => {
+  const [startTime, setStartTime] = useState<number>(() => {
     const stored = getStoredState();
 
     // If we have a stored state AND the generationId matches, resume
@@ -146,6 +149,32 @@ export function DevelopmentLogs({
 
   // Track if component has completed to prevent double onComplete calls
   const hasCompletedRef = useRef(false);
+  
+  // Reset all state when generationId changes (new job started)
+  useEffect(() => {
+    // Skip on initial mount
+    if (lastGenerationIdRef.current === generationId) {
+      return;
+    }
+    
+    // generationId changed - reset everything for the new job
+    console.log(`[DevelopmentLogs] generationId changed: ${lastGenerationIdRef.current} -> ${generationId}, resetting progress`);
+    lastGenerationIdRef.current = generationId;
+    
+    // Clear old stored state
+    clearStoredState();
+    
+    // Reset all state to initial values
+    const now = Date.now();
+    setStartTime(now);
+    setCurrentStage(0);
+    setProgress(0);
+    setCurrentTipIndex(0);
+    hasCompletedRef.current = false;
+    
+    // Store the new state
+    setStoredState({ startTime: now, tipIndex: 0, generationId });
+  }, [generationId]);
 
   useEffect(() => {
     // Calculate elapsed time since generation started
