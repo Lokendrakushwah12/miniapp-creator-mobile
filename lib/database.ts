@@ -1,6 +1,6 @@
 import { logger } from "./logger";
-import { db, users, projects, projectFiles, projectPatches, projectDeployments, userSessions, chatMessages, generationJobs } from '../db';
-import { eq, and, desc, sql } from 'drizzle-orm';
+import { db, users, projects, projectFiles, projectPatches, projectDeployments, userSessions, chatMessages, generationJobs, apiUsage, payments } from '../db';
+import { eq, and, desc, sql, gte, count, countDistinct, sum } from 'drizzle-orm';
 
 // Type definition for generation job context
 export interface GenerationJobContext {
@@ -506,4 +506,262 @@ export async function getUserGenerationJobs(userId: string, limit: number = 20) 
     .where(eq(generationJobs.userId, userId))
     .orderBy(desc(generationJobs.createdAt))
     .limit(limit);
+}
+
+// ============================================
+// API Usage Tracking Functions
+// ============================================
+
+export async function saveApiUsage(
+  model: string,
+  inputTokens: number,
+  outputTokens: number,
+  costUsd: number,
+  stage?: string,
+  userId?: string,
+  projectId?: string
+) {
+  try {
+    const [usage] = await db.insert(apiUsage).values({
+      userId: userId || null,
+      projectId: projectId || null,
+      model,
+      stage,
+      inputTokens,
+      outputTokens,
+      costUsd: costUsd.toFixed(6),
+    }).returning();
+    return usage;
+  } catch (error) {
+    logger.error('Failed to save API usage:', error);
+    // Don't throw - we don't want to fail the main operation if tracking fails
+    return null;
+  }
+}
+
+// ============================================
+// Payment Tracking Functions
+// ============================================
+
+export async function savePayment(
+  amountUsd: number,
+  creditsPurchased: number,
+  userId?: string,
+  walletAddress?: string,
+  transactionHash?: string,
+  status: string = 'completed'
+) {
+  const [payment] = await db.insert(payments).values({
+    userId: userId || null,
+    walletAddress,
+    amountUsd: amountUsd.toFixed(2),
+    creditsPurchased,
+    transactionHash,
+    status,
+  }).returning();
+  return payment;
+}
+
+export async function getPaymentsByUserId(userId: string) {
+  return await db.select().from(payments)
+    .where(eq(payments.userId, userId))
+    .orderBy(desc(payments.createdAt));
+}
+
+// ============================================
+// Dashboard Metrics Functions
+// ============================================
+
+export interface GrowthMetrics {
+  totalUsers: number;
+  dau: number;
+  mau: number;
+  peakActiveHour: { hour: string; count: number } | null;
+  paidUsers: number;
+  recurringUsers: number;
+  deploymentsSuccess: number;
+  deploymentsFailed: number;
+  publishedApps: number;
+  avgFailsPerUser: number;
+}
+
+export interface RevenueMetrics {
+  dailyPayers: number;
+  totalPayers: number;
+  recurringPayers: number;
+  totalApiCost: number;
+  dailyApiCost: number;
+  totalRevenue: number;
+  dailyRevenue: number;
+}
+
+export async function getGrowthMetrics(): Promise<GrowthMetrics> {
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+
+  // Total users
+  const [totalUsersResult] = await db.select({ count: count() }).from(users);
+  const totalUsers = totalUsersResult?.count || 0;
+
+  // DAU - distinct users with sessions in last 24 hours
+  const [dauResult] = await db
+    .select({ count: countDistinct(userSessions.userId) })
+    .from(userSessions)
+    .where(gte(userSessions.createdAt, oneDayAgo));
+  const dau = dauResult?.count || 0;
+
+  // MAU - distinct users with sessions in last 30 days
+  const [mauResult] = await db
+    .select({ count: countDistinct(userSessions.userId) })
+    .from(userSessions)
+    .where(gte(userSessions.createdAt, thirtyDaysAgo));
+  const mau = mauResult?.count || 0;
+
+  // Peak active hour (sessions grouped by hour)
+  const peakHourResult = await db
+    .select({
+      hour: sql<string>`date_trunc('hour', ${userSessions.createdAt})::text`,
+      count: count(),
+    })
+    .from(userSessions)
+    .groupBy(sql`date_trunc('hour', ${userSessions.createdAt})`)
+    .orderBy(desc(count()))
+    .limit(1);
+  const peakActiveHour = peakHourResult[0] ? { hour: peakHourResult[0].hour, count: peakHourResult[0].count } : null;
+
+  // Paid users - users with at least one payment
+  const [paidUsersResult] = await db
+    .select({ count: countDistinct(payments.userId) })
+    .from(payments)
+    .where(eq(payments.status, 'completed'));
+  const paidUsers = paidUsersResult?.count || 0;
+
+  // Recurring users - users with more than one session
+  const recurringUsersResult = await db
+    .select({ userId: userSessions.userId, sessionCount: count() })
+    .from(userSessions)
+    .groupBy(userSessions.userId);
+  const recurringUsers = recurringUsersResult.filter(r => r.sessionCount > 1).length;
+
+  // Deployment stats
+  const [successResult] = await db
+    .select({ count: count() })
+    .from(projectDeployments)
+    .where(eq(projectDeployments.status, 'success'));
+  const deploymentsSuccess = successResult?.count || 0;
+
+  const [failedResult] = await db
+    .select({ count: count() })
+    .from(projectDeployments)
+    .where(eq(projectDeployments.status, 'failed'));
+  const deploymentsFailed = failedResult?.count || 0;
+
+  // Published apps
+  const [publishedResult] = await db
+    .select({ count: count() })
+    .from(projects)
+    .where(sql`${projects.publishedAt} IS NOT NULL`);
+  const publishedApps = publishedResult?.count || 0;
+
+  // Average fails per user
+  const failsPerUserResult = await db
+    .select({
+      userId: projects.userId,
+      failCount: count(),
+    })
+    .from(projectDeployments)
+    .innerJoin(projects, eq(projectDeployments.projectId, projects.id))
+    .where(eq(projectDeployments.status, 'failed'))
+    .groupBy(projects.userId);
+  
+  const avgFailsPerUser = failsPerUserResult.length > 0
+    ? failsPerUserResult.reduce((sum, r) => sum + r.failCount, 0) / failsPerUserResult.length
+    : 0;
+
+  return {
+    totalUsers,
+    dau,
+    mau,
+    peakActiveHour,
+    paidUsers,
+    recurringUsers,
+    deploymentsSuccess,
+    deploymentsFailed,
+    publishedApps,
+    avgFailsPerUser: Math.round(avgFailsPerUser * 100) / 100,
+  };
+}
+
+export async function getRevenueMetrics(): Promise<RevenueMetrics> {
+  const now = new Date();
+  const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+  // Daily payers
+  const [dailyPayersResult] = await db
+    .select({ count: countDistinct(payments.userId) })
+    .from(payments)
+    .where(and(
+      gte(payments.createdAt, oneDayAgo),
+      eq(payments.status, 'completed')
+    ));
+  const dailyPayers = dailyPayersResult?.count || 0;
+
+  // Total payers
+  const [totalPayersResult] = await db
+    .select({ count: countDistinct(payments.userId) })
+    .from(payments)
+    .where(eq(payments.status, 'completed'));
+  const totalPayers = totalPayersResult?.count || 0;
+
+  // Recurring payers (users with 2+ payments)
+  const payerCountsResult = await db
+    .select({
+      userId: payments.userId,
+      paymentCount: count(),
+    })
+    .from(payments)
+    .where(eq(payments.status, 'completed'))
+    .groupBy(payments.userId);
+  const recurringPayers = payerCountsResult.filter(r => r.paymentCount >= 2).length;
+
+  // Total API cost
+  const [totalApiCostResult] = await db
+    .select({ total: sum(apiUsage.costUsd) })
+    .from(apiUsage);
+  const totalApiCost = parseFloat(totalApiCostResult?.total || '0');
+
+  // Daily API cost
+  const [dailyApiCostResult] = await db
+    .select({ total: sum(apiUsage.costUsd) })
+    .from(apiUsage)
+    .where(gte(apiUsage.createdAt, oneDayAgo));
+  const dailyApiCost = parseFloat(dailyApiCostResult?.total || '0');
+
+  // Total revenue
+  const [totalRevenueResult] = await db
+    .select({ total: sum(payments.amountUsd) })
+    .from(payments)
+    .where(eq(payments.status, 'completed'));
+  const totalRevenue = parseFloat(totalRevenueResult?.total || '0');
+
+  // Daily revenue
+  const [dailyRevenueResult] = await db
+    .select({ total: sum(payments.amountUsd) })
+    .from(payments)
+    .where(and(
+      gte(payments.createdAt, oneDayAgo),
+      eq(payments.status, 'completed')
+    ));
+  const dailyRevenue = parseFloat(dailyRevenueResult?.total || '0');
+
+  return {
+    dailyPayers,
+    totalPayers,
+    recurringPayers,
+    totalApiCost: Math.round(totalApiCost * 100) / 100,
+    dailyApiCost: Math.round(dailyApiCost * 100) / 100,
+    totalRevenue: Math.round(totalRevenue * 100) / 100,
+    dailyRevenue: Math.round(dailyRevenue * 100) / 100,
+  };
 }

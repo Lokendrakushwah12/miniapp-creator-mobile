@@ -1,4 +1,4 @@
-import { pgTable, uuid, text, timestamp, integer, jsonb, boolean } from 'drizzle-orm/pg-core';
+import { pgTable, uuid, text, timestamp, integer, jsonb, boolean, decimal } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // Users table (linked to Farcaster)
@@ -100,11 +100,38 @@ export const generationJobs = pgTable('generation_jobs', {
   expiresAt: timestamp('expires_at').notNull(), // 24 hours from creation
 });
 
+// API usage tracking table (for LLM cost tracking)
+export const apiUsage = pgTable('api_usage', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  projectId: uuid('project_id').references(() => projects.id, { onDelete: 'cascade' }),
+  model: text('model').notNull(),
+  stage: text('stage'), // 'intent_parser', 'patch_planner', 'code_generator', etc.
+  inputTokens: integer('input_tokens').notNull(),
+  outputTokens: integer('output_tokens').notNull(),
+  costUsd: decimal('cost_usd', { precision: 10, scale: 6 }).notNull(),
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
+// Payments table (for tracking user payments/credits)
+export const payments = pgTable('payments', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+  walletAddress: text('wallet_address'),
+  amountUsd: decimal('amount_usd', { precision: 10, scale: 2 }).notNull(),
+  creditsPurchased: integer('credits_purchased').notNull(),
+  transactionHash: text('transaction_hash'),
+  status: text('status').default('completed').notNull(), // 'pending', 'completed', 'failed', 'refunded'
+  createdAt: timestamp('created_at').defaultNow().notNull(),
+});
+
 // Define relations
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects),
   sessions: many(userSessions),
   generationJobs: many(generationJobs),
+  apiUsage: many(apiUsage),
+  payments: many(payments),
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -116,6 +143,7 @@ export const projectsRelations = relations(projects, ({ one, many }) => ({
   patches: many(projectPatches),
   deployments: many(projectDeployments),
   chatMessages: many(chatMessages),
+  apiUsage: many(apiUsage),
 }));
 
 export const projectFilesRelations = relations(projectFiles, ({ one }) => ({
@@ -161,5 +189,23 @@ export const generationJobsRelations = relations(generationJobs, ({ one }) => ({
   project: one(projects, {
     fields: [generationJobs.projectId],
     references: [projects.id],
+  }),
+}));
+
+export const apiUsageRelations = relations(apiUsage, ({ one }) => ({
+  user: one(users, {
+    fields: [apiUsage.userId],
+    references: [users.id],
+  }),
+  project: one(projects, {
+    fields: [apiUsage.projectId],
+    references: [projects.id],
+  }),
+}));
+
+export const paymentsRelations = relations(payments, ({ one }) => ({
+  user: one(users, {
+    fields: [payments.userId],
+    references: [users.id],
   }),
 }));
