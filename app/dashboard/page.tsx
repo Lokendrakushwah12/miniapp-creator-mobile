@@ -2,7 +2,20 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { AreaChart, BarChart, LineChart } from '@tremor/react';
+import {
+  LineChart,
+  Line,
+  AreaChart,
+  Area,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from 'recharts';
 
 interface GrowthMetrics {
   totalUsers: number;
@@ -71,7 +84,6 @@ export default function DashboardPage() {
   const [revenueChartData, setRevenueChartData] = useState<RevenueChartData | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
 
-  // Check for existing token on mount
   useEffect(() => {
     const token = localStorage.getItem('dashboard_token');
     if (token) {
@@ -168,7 +180,6 @@ export default function DashboardPage() {
     }
   }, []);
 
-  // Fetch metrics when authenticated or tab changes
   useEffect(() => {
     if (isAuthenticated) {
       fetchMetrics(activeTab);
@@ -245,7 +256,6 @@ export default function DashboardPage() {
 
   return (
     <div className="min-h-screen bg-[#0f0f1a]">
-      {/* Header */}
       <header className="bg-[#1a1a2e] border-b border-[#2a2a4e] px-6 py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -263,9 +273,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main className="max-w-7xl mx-auto px-6 py-8">
-        {/* Tabs */}
         <div className="flex gap-1 mb-8 bg-[#1a1a2e] p-1 rounded-xl w-fit">
           <button
             onClick={() => setActiveTab('growth')}
@@ -325,73 +333,82 @@ function GrowthTab({ metrics, chartData }: { metrics: GrowthMetrics | null; char
     { label: 'Avg Fails/User', value: metrics.avgFailsPerUser, icon: '📉', color: 'from-orange-500 to-orange-600' },
   ];
 
-  // Transform chart data for Tremor
   const userSignupsData = chartData?.userSignups.map(d => ({
     date: formatDate(d.date),
-    'New Users': d.value,
+    users: d.value,
   })) || [];
 
   const activeUsersData = chartData?.activeUsers.map(d => ({
     date: formatDate(d.date),
-    'Active Users': d.value,
+    active: d.value,
   })) || [];
 
   const deploymentsData = chartData?.deployments.map(d => ({
     date: formatDate(d.date),
-    'Success': d.success,
-    'Failed': d.failed,
+    success: d.success,
+    failed: d.failed,
   })) || [];
 
   return (
     <div className="space-y-8">
-      {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {cards.map((card, index) => (
           <MetricCard key={index} {...card} />
         ))}
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* User Signups Chart */}
         <ChartCard title="New User Signups" subtitle="Last 30 days">
-          <AreaChart
-            className="h-72"
-            data={userSignupsData}
-            index="date"
-            categories={['New Users']}
-            colors={['blue']}
-            showLegend={false}
-            showGridLines={false}
-            curveType="monotone"
-          />
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={userSignupsData}>
+              <defs>
+                <linearGradient id="colorUsers" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4e" />
+              <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+              <YAxis stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #2a2a4e', borderRadius: '8px' }}
+                labelStyle={{ color: '#fff' }}
+              />
+              <Area type="monotone" dataKey="users" stroke="#3b82f6" fillOpacity={1} fill="url(#colorUsers)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
         </ChartCard>
 
-        {/* Active Users Chart */}
         <ChartCard title="Daily Active Users" subtitle="Last 30 days">
-          <LineChart
-            className="h-72"
-            data={activeUsersData}
-            index="date"
-            categories={['Active Users']}
-            colors={['emerald']}
-            showLegend={false}
-            showGridLines={false}
-            curveType="monotone"
-          />
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={activeUsersData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4e" />
+              <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+              <YAxis stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #2a2a4e', borderRadius: '8px' }}
+                labelStyle={{ color: '#fff' }}
+              />
+              <Line type="monotone" dataKey="active" stroke="#10b981" strokeWidth={2} dot={false} />
+            </LineChart>
+          </ResponsiveContainer>
         </ChartCard>
 
-        {/* Deployments Chart */}
         <ChartCard title="Deployments" subtitle="Success vs Failed - Last 30 days" className="lg:col-span-2">
-          <BarChart
-            className="h-72"
-            data={deploymentsData}
-            index="date"
-            categories={['Success', 'Failed']}
-            colors={['emerald', 'rose']}
-            stack={false}
-            showGridLines={false}
-          />
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={deploymentsData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4e" />
+              <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+              <YAxis stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #2a2a4e', borderRadius: '8px' }}
+                labelStyle={{ color: '#fff' }}
+              />
+              <Legend wrapperStyle={{ color: '#9ca3af' }} />
+              <Bar dataKey="success" fill="#10b981" radius={[4, 4, 0, 0]} />
+              <Bar dataKey="failed" fill="#ef4444" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </ChartCard>
       </div>
     </div>
@@ -418,75 +435,84 @@ function RevenueTab({ metrics, chartData }: { metrics: RevenueMetrics | null; ch
     { label: 'Daily Margin', value: `$${(metrics.dailyRevenue - metrics.dailyApiCost).toFixed(2)}`, icon: '📊', color: metrics.dailyRevenue - metrics.dailyApiCost >= 0 ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600' },
   ];
 
-  // Transform chart data for Tremor
   const revenueVsCostData = chartData?.revenueVsCost.map(d => ({
     date: formatDate(d.date),
-    'Revenue': d.revenue,
-    'API Cost': d.cost,
+    revenue: d.revenue,
+    cost: d.cost,
   })) || [];
 
   const dailyPayersData = chartData?.dailyPayers.map(d => ({
     date: formatDate(d.date),
-    'Payers': d.value,
+    payers: d.value,
   })) || [];
 
-  // Calculate margin data
   const marginData = chartData?.revenueVsCost.map(d => ({
     date: formatDate(d.date),
-    'Margin': Math.round((d.revenue - d.cost) * 100) / 100,
+    margin: Math.round((d.revenue - d.cost) * 100) / 100,
   })) || [];
 
   return (
     <div className="space-y-8">
-      {/* Metric Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {cards.map((card, index) => (
           <MetricCard key={index} {...card} />
         ))}
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Revenue vs Cost Chart */}
         <ChartCard title="Revenue vs API Cost" subtitle="Last 30 days">
-          <LineChart
-            className="h-72"
-            data={revenueVsCostData}
-            index="date"
-            categories={['Revenue', 'API Cost']}
-            colors={['emerald', 'rose']}
-            showGridLines={false}
-            curveType="monotone"
-            valueFormatter={(v) => `$${v.toFixed(2)}`}
-          />
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={revenueVsCostData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4e" />
+              <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+              <YAxis stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #2a2a4e', borderRadius: '8px' }}
+                labelStyle={{ color: '#fff' }}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, '']}
+              />
+              <Legend wrapperStyle={{ color: '#9ca3af' }} />
+              <Line type="monotone" dataKey="revenue" stroke="#10b981" strokeWidth={2} dot={false} name="Revenue" />
+              <Line type="monotone" dataKey="cost" stroke="#ef4444" strokeWidth={2} dot={false} name="API Cost" />
+            </LineChart>
+          </ResponsiveContainer>
         </ChartCard>
 
-        {/* Daily Payers Chart */}
         <ChartCard title="Daily Paying Users" subtitle="Last 30 days">
-          <BarChart
-            className="h-72"
-            data={dailyPayersData}
-            index="date"
-            categories={['Payers']}
-            colors={['blue']}
-            showLegend={false}
-            showGridLines={false}
-          />
+          <ResponsiveContainer width="100%" height={280}>
+            <BarChart data={dailyPayersData}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4e" />
+              <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+              <YAxis stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #2a2a4e', borderRadius: '8px' }}
+                labelStyle={{ color: '#fff' }}
+              />
+              <Bar dataKey="payers" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
         </ChartCard>
 
-        {/* Margin Trend Chart */}
         <ChartCard title="Daily Margin Trend" subtitle="Revenue - API Cost" className="lg:col-span-2">
-          <AreaChart
-            className="h-72"
-            data={marginData}
-            index="date"
-            categories={['Margin']}
-            colors={['cyan']}
-            showLegend={false}
-            showGridLines={false}
-            curveType="monotone"
-            valueFormatter={(v) => `$${v.toFixed(2)}`}
-          />
+          <ResponsiveContainer width="100%" height={280}>
+            <AreaChart data={marginData}>
+              <defs>
+                <linearGradient id="colorMargin" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.3}/>
+                  <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#2a2a4e" />
+              <XAxis dataKey="date" stroke="#6b7280" fontSize={12} tickLine={false} />
+              <YAxis stroke="#6b7280" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(v) => `$${v}`} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #2a2a4e', borderRadius: '8px' }}
+                labelStyle={{ color: '#fff' }}
+                formatter={(value: number) => [`$${value.toFixed(2)}`, 'Margin']}
+              />
+              <Area type="monotone" dataKey="margin" stroke="#06b6d4" fillOpacity={1} fill="url(#colorMargin)" strokeWidth={2} />
+            </AreaChart>
+          </ResponsiveContainer>
         </ChartCard>
       </div>
     </div>
