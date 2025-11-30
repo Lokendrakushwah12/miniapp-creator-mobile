@@ -188,6 +188,19 @@ export function formatErrorsForLLM(parsed: ParsedDeploymentErrors): string {
 }
 
 /**
+ * Normalize file path for comparison
+ * - Remove leading ./ prefix
+ * - Normalize backslashes to forward slashes
+ * - Trim whitespace
+ */
+function normalizePath(p: string): string {
+  return p
+    .replace(/^\.\//, '')  // Remove leading ./
+    .replace(/\\/g, '/')   // Normalize backslashes
+    .trim();
+}
+
+/**
  * Extract files that need fixing based on errors
  */
 export function getFilesToFix(
@@ -196,10 +209,10 @@ export function getFilesToFix(
 ): { filename: string; content: string }[] {
   const filesToFix = new Set<string>();
 
-  // Add files mentioned in errors
+  // Add files mentioned in errors (normalized)
   for (const error of parsed.errors) {
     if (error.file) {
-      filesToFix.add(error.file);
+      filesToFix.add(normalizePath(error.file));
     }
   }
 
@@ -210,6 +223,9 @@ export function getFilesToFix(
     filesToFix.add('.eslintrc.js');
   }
 
-  // Return the actual file objects
-  return allFiles.filter(f => filesToFix.has(f.filename));
+  // Return the actual file objects using normalized path comparison
+  return allFiles.filter(f => {
+    const normalizedFilename = normalizePath(f.filename);
+    return [...filesToFix].some(errorFile => normalizedFilename === errorFile);
+  });
 }
