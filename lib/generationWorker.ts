@@ -903,10 +903,77 @@ async function fixDeploymentErrors(
 
     // Apply fixes to current files
     logger.log(`\n🔧 Applying diffs to files...`);
-    const fixedFiles = applyDiffsToFiles(currentFiles, fileDiffs);
-    logger.log(`✅ Applied fixes to ${fixedFiles.length} files`);
+    const modifiedFiles = applyDiffsToFiles(currentFiles, fileDiffs);
+    logger.log(`✅ Applied fixes to ${modifiedFiles.length} files`);
 
-    return fixedFiles;
+    // Merge modified files with unchanged files
+    // applyDiffsToFiles only returns files that were modified, so we need to include unchanged files
+    const modifiedFileNames = new Set(modifiedFiles.map(f => f.filename));
+    const unchangedFiles = currentFiles.filter(f => !modifiedFileNames.has(f.filename));
+    const allFiles = [...modifiedFiles, ...unchangedFiles];
+    
+    logger.log(`📊 Merged result: ${modifiedFiles.length} modified + ${unchangedFiles.length} unchanged = ${allFiles.length} total files`);
+
+    // Check if any files actually changed content
+    const filesActuallyChanged = modifiedFiles.some(modified => {
+      const original = currentFiles.find(f => f.filename === modified.filename);
+      return original && original.content !== modified.content;
+    });
+
+    if (!filesActuallyChanged) {
+      logger.log("⚠️ No files actually changed after diff application - falling back to full file rewrite");
+      
+      // Fallback: Request full file content from LLM instead of diffs
+      const fullRewritePrompt = getStage4ValidatorPrompt(
+        filesToFix,
+        [errorMessage],
+        true,  // Request complete file content
+        appType
+      );
+      
+      logger.log(`🔄 Retrying with full file rewrite prompt...`);
+      
+      const fullResponse = await callClaudeWithLogging(
+        fullRewritePrompt,
+        "",
+        "Stage 4: Deployment Error Fixes (Full Rewrite)",
+        "STAGE_4_VALIDATOR"
+      );
+      
+      logger.log(`📄 Full rewrite response received, length: ${fullResponse.length} chars`);
+      
+      try {
+        const fullFixes = parseStage4ValidatorResponse(fullResponse);
+        logger.log(`✅ Parsed ${fullFixes.length} full file fixes from LLM`);
+        
+        if (fullFixes.length > 0) {
+          // Apply full content fixes
+          const rewrittenFiles = currentFiles.map(currentFile => {
+            const fix = fullFixes.find(f => f.filename === currentFile.filename);
+            if (fix && fix.content) {
+              logger.log(`📝 Applying full rewrite to: ${fix.filename}`);
+              return { ...currentFile, content: fix.content };
+            }
+            return currentFile;
+          });
+          
+          const rewriteChanges = rewrittenFiles.filter((f, idx) => f.content !== currentFiles[idx].content);
+          logger.log(`✅ Full rewrite applied to ${rewriteChanges.length} files`);
+          
+          return rewrittenFiles;
+        }
+      } catch (fullRewriteError) {
+        logger.error("❌ Full rewrite fallback also failed:", fullRewriteError);
+      }
+      
+      // If full rewrite also fails, return the original files
+      logger.log("⚠️ Full rewrite fallback did not produce changes, returning original files");
+      return currentFiles;
+    } else {
+      logger.log("✅ Files were successfully modified");
+    }
+
+    return allFiles;
   } catch (parseError) {
     logger.error("❌ Failed to parse LLM fix response:", parseError);
     logger.error("Stack trace:", parseError instanceof Error ? parseError.stack : 'No stack trace');
