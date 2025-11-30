@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
-import { getRevenueMetrics } from "../../../../lib/database";
+import { 
+  getRevenueMetrics, 
+  getDailyRevenueVsCost, 
+  getDailyPayers 
+} from "../../../../lib/database";
 
 const JWT_SECRET = new TextEncoder().encode(
   process.env.ADMIN_JWT_SECRET || "minidev-dashboard-secret-key-change-in-production"
@@ -21,7 +25,7 @@ async function verifyAdminToken(req: NextRequest): Promise<boolean> {
   }
 }
 
-// GET: Fetch revenue metrics
+// GET: Fetch revenue metrics with chart data
 export async function GET(req: NextRequest) {
   try {
     const isAuthorized = await verifyAdminToken(req);
@@ -32,11 +36,20 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const metrics = await getRevenueMetrics();
+    // Fetch all data in parallel
+    const [metrics, revenueVsCost, dailyPayers] = await Promise.all([
+      getRevenueMetrics(),
+      getDailyRevenueVsCost(30),
+      getDailyPayers(30),
+    ]);
 
     return NextResponse.json({
       success: true,
       metrics,
+      chartData: {
+        revenueVsCost,
+        dailyPayers,
+      },
     });
   } catch (error) {
     console.error("Dashboard revenue error:", error);

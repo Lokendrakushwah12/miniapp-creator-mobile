@@ -765,3 +765,250 @@ export async function getRevenueMetrics(): Promise<RevenueMetrics> {
     dailyRevenue: Math.round(dailyRevenue * 100) / 100,
   };
 }
+
+// ============================================
+// Time-Series Chart Data Functions
+// ============================================
+
+export interface ChartDataPoint {
+  date: string;
+  value: number;
+}
+
+export interface DeploymentChartPoint {
+  date: string;
+  success: number;
+  failed: number;
+}
+
+export interface RevenueChartPoint {
+  date: string;
+  revenue: number;
+  cost: number;
+}
+
+/**
+ * Get daily user signups for the last N days
+ */
+export async function getDailyUserSignups(days: number = 30): Promise<ChartDataPoint[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const result = await db
+    .select({
+      date: sql<string>`date_trunc('day', ${users.createdAt})::date::text`,
+      value: count(),
+    })
+    .from(users)
+    .where(gte(users.createdAt, startDate))
+    .groupBy(sql`date_trunc('day', ${users.createdAt})`)
+    .orderBy(sql`date_trunc('day', ${users.createdAt})`);
+
+  // Fill in missing days with zeros
+  return fillMissingDays(result, days);
+}
+
+/**
+ * Get daily active users for the last N days
+ */
+export async function getDailyActiveUsers(days: number = 30): Promise<ChartDataPoint[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const result = await db
+    .select({
+      date: sql<string>`date_trunc('day', ${userSessions.createdAt})::date::text`,
+      value: countDistinct(userSessions.userId),
+    })
+    .from(userSessions)
+    .where(gte(userSessions.createdAt, startDate))
+    .groupBy(sql`date_trunc('day', ${userSessions.createdAt})`)
+    .orderBy(sql`date_trunc('day', ${userSessions.createdAt})`);
+
+  return fillMissingDays(result, days);
+}
+
+/**
+ * Get daily deployments (success vs failed) for the last N days
+ */
+export async function getDailyDeployments(days: number = 30): Promise<DeploymentChartPoint[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const result = await db
+    .select({
+      date: sql<string>`date_trunc('day', ${projectDeployments.createdAt})::date::text`,
+      status: projectDeployments.status,
+      count: count(),
+    })
+    .from(projectDeployments)
+    .where(gte(projectDeployments.createdAt, startDate))
+    .groupBy(sql`date_trunc('day', ${projectDeployments.createdAt})`, projectDeployments.status)
+    .orderBy(sql`date_trunc('day', ${projectDeployments.createdAt})`);
+
+  // Aggregate success and failed counts per day
+  const dateMap = new Map<string, { success: number; failed: number }>();
+  
+  for (const row of result) {
+    if (!dateMap.has(row.date)) {
+      dateMap.set(row.date, { success: 0, failed: 0 });
+    }
+    const entry = dateMap.get(row.date)!;
+    if (row.status === 'success') {
+      entry.success = row.count;
+    } else if (row.status === 'failed') {
+      entry.failed = row.count;
+    }
+  }
+
+  // Fill missing days
+  const filledData: DeploymentChartPoint[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    
+    const existing = dateMap.get(dateStr);
+    filledData.push({
+      date: dateStr,
+      success: existing?.success || 0,
+      failed: existing?.failed || 0,
+    });
+  }
+
+  return filledData;
+}
+
+/**
+ * Get daily API costs for the last N days
+ */
+export async function getDailyApiCosts(days: number = 30): Promise<ChartDataPoint[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const result = await db
+    .select({
+      date: sql<string>`date_trunc('day', ${apiUsage.createdAt})::date::text`,
+      value: sql<string>`COALESCE(SUM(${apiUsage.costUsd}), 0)`,
+    })
+    .from(apiUsage)
+    .where(gte(apiUsage.createdAt, startDate))
+    .groupBy(sql`date_trunc('day', ${apiUsage.createdAt})`)
+    .orderBy(sql`date_trunc('day', ${apiUsage.createdAt})`);
+
+  const chartData = result.map(r => ({
+    date: r.date,
+    value: Math.round(parseFloat(r.value) * 100) / 100,
+  }));
+
+  return fillMissingDays(chartData, days);
+}
+
+/**
+ * Get daily revenue for the last N days
+ */
+export async function getDailyRevenue(days: number = 30): Promise<ChartDataPoint[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const result = await db
+    .select({
+      date: sql<string>`date_trunc('day', ${payments.createdAt})::date::text`,
+      value: sql<string>`COALESCE(SUM(${payments.amountUsd}), 0)`,
+    })
+    .from(payments)
+    .where(and(
+      gte(payments.createdAt, startDate),
+      eq(payments.status, 'completed')
+    ))
+    .groupBy(sql`date_trunc('day', ${payments.createdAt})`)
+    .orderBy(sql`date_trunc('day', ${payments.createdAt})`);
+
+  const chartData = result.map(r => ({
+    date: r.date,
+    value: Math.round(parseFloat(r.value) * 100) / 100,
+  }));
+
+  return fillMissingDays(chartData, days);
+}
+
+/**
+ * Get combined revenue and cost data for the last N days
+ */
+export async function getDailyRevenueVsCost(days: number = 30): Promise<RevenueChartPoint[]> {
+  const [revenueData, costData] = await Promise.all([
+    getDailyRevenue(days),
+    getDailyApiCosts(days),
+  ]);
+
+  // Combine into single data points
+  const combined: RevenueChartPoint[] = [];
+  for (let i = 0; i < revenueData.length; i++) {
+    combined.push({
+      date: revenueData[i].date,
+      revenue: revenueData[i].value,
+      cost: costData[i]?.value || 0,
+    });
+  }
+
+  return combined;
+}
+
+/**
+ * Get daily payer count for the last N days
+ */
+export async function getDailyPayers(days: number = 30): Promise<ChartDataPoint[]> {
+  const startDate = new Date();
+  startDate.setDate(startDate.getDate() - days);
+  startDate.setHours(0, 0, 0, 0);
+
+  const result = await db
+    .select({
+      date: sql<string>`date_trunc('day', ${payments.createdAt})::date::text`,
+      value: countDistinct(payments.userId),
+    })
+    .from(payments)
+    .where(and(
+      gte(payments.createdAt, startDate),
+      eq(payments.status, 'completed')
+    ))
+    .groupBy(sql`date_trunc('day', ${payments.createdAt})`)
+    .orderBy(sql`date_trunc('day', ${payments.createdAt})`);
+
+  return fillMissingDays(result, days);
+}
+
+/**
+ * Helper function to fill in missing days with zero values
+ */
+function fillMissingDays(data: ChartDataPoint[], days: number): ChartDataPoint[] {
+  const dateMap = new Map<string, number>();
+  for (const point of data) {
+    dateMap.set(point.date, point.value);
+  }
+
+  const filledData: ChartDataPoint[] = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  for (let i = days - 1; i >= 0; i--) {
+    const date = new Date(today);
+    date.setDate(date.getDate() - i);
+    const dateStr = date.toISOString().split('T')[0];
+    
+    filledData.push({
+      date: dateStr,
+      value: dateMap.get(dateStr) || 0,
+    });
+  }
+
+  return filledData;
+}

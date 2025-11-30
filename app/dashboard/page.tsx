@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
+import { AreaChart, BarChart, LineChart } from '@tremor/react';
 
 interface GrowthMetrics {
   totalUsers: number;
@@ -26,6 +27,34 @@ interface RevenueMetrics {
   dailyRevenue: number;
 }
 
+interface ChartDataPoint {
+  date: string;
+  value: number;
+}
+
+interface DeploymentChartPoint {
+  date: string;
+  success: number;
+  failed: number;
+}
+
+interface RevenueChartPoint {
+  date: string;
+  revenue: number;
+  cost: number;
+}
+
+interface GrowthChartData {
+  userSignups: ChartDataPoint[];
+  activeUsers: ChartDataPoint[];
+  deployments: DeploymentChartPoint[];
+}
+
+interface RevenueChartData {
+  revenueVsCost: RevenueChartPoint[];
+  dailyPayers: ChartDataPoint[];
+}
+
 type TabType = 'growth' | 'revenue';
 
 export default function DashboardPage() {
@@ -37,7 +66,9 @@ export default function DashboardPage() {
   
   const [activeTab, setActiveTab] = useState<TabType>('growth');
   const [growthMetrics, setGrowthMetrics] = useState<GrowthMetrics | null>(null);
+  const [growthChartData, setGrowthChartData] = useState<GrowthChartData | null>(null);
   const [revenueMetrics, setRevenueMetrics] = useState<RevenueMetrics | null>(null);
+  const [revenueChartData, setRevenueChartData] = useState<RevenueChartData | null>(null);
   const [metricsLoading, setMetricsLoading] = useState(false);
 
   // Check for existing token on mount
@@ -98,7 +129,9 @@ export default function DashboardPage() {
     localStorage.removeItem('dashboard_token');
     setIsAuthenticated(false);
     setGrowthMetrics(null);
+    setGrowthChartData(null);
     setRevenueMetrics(null);
+    setRevenueChartData(null);
   };
 
   const fetchMetrics = useCallback(async (tab: TabType) => {
@@ -122,8 +155,10 @@ export default function DashboardPage() {
       if (data.success) {
         if (tab === 'growth') {
           setGrowthMetrics(data.metrics);
+          setGrowthChartData(data.chartData);
         } else {
           setRevenueMetrics(data.metrics);
+          setRevenueChartData(data.chartData);
         }
       }
     } catch {
@@ -259,16 +294,16 @@ export default function DashboardPage() {
             <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-orange-500"></div>
           </div>
         ) : activeTab === 'growth' ? (
-          <GrowthTab metrics={growthMetrics} />
+          <GrowthTab metrics={growthMetrics} chartData={growthChartData} />
         ) : (
-          <RevenueTab metrics={revenueMetrics} />
+          <RevenueTab metrics={revenueMetrics} chartData={revenueChartData} />
         )}
       </main>
     </div>
   );
 }
 
-function GrowthTab({ metrics }: { metrics: GrowthMetrics | null }) {
+function GrowthTab({ metrics, chartData }: { metrics: GrowthMetrics | null; chartData: GrowthChartData | null }) {
   if (!metrics) {
     return (
       <div className="text-center py-20 text-gray-400">
@@ -290,16 +325,80 @@ function GrowthTab({ metrics }: { metrics: GrowthMetrics | null }) {
     { label: 'Avg Fails/User', value: metrics.avgFailsPerUser, icon: '📉', color: 'from-orange-500 to-orange-600' },
   ];
 
+  // Transform chart data for Tremor
+  const userSignupsData = chartData?.userSignups.map(d => ({
+    date: formatDate(d.date),
+    'New Users': d.value,
+  })) || [];
+
+  const activeUsersData = chartData?.activeUsers.map(d => ({
+    date: formatDate(d.date),
+    'Active Users': d.value,
+  })) || [];
+
+  const deploymentsData = chartData?.deployments.map(d => ({
+    date: formatDate(d.date),
+    'Success': d.success,
+    'Failed': d.failed,
+  })) || [];
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-      {cards.map((card, index) => (
-        <MetricCard key={index} {...card} />
-      ))}
+    <div className="space-y-8">
+      {/* Metric Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
+        {cards.map((card, index) => (
+          <MetricCard key={index} {...card} />
+        ))}
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* User Signups Chart */}
+        <ChartCard title="New User Signups" subtitle="Last 30 days">
+          <AreaChart
+            className="h-72"
+            data={userSignupsData}
+            index="date"
+            categories={['New Users']}
+            colors={['blue']}
+            showLegend={false}
+            showGridLines={false}
+            curveType="monotone"
+          />
+        </ChartCard>
+
+        {/* Active Users Chart */}
+        <ChartCard title="Daily Active Users" subtitle="Last 30 days">
+          <LineChart
+            className="h-72"
+            data={activeUsersData}
+            index="date"
+            categories={['Active Users']}
+            colors={['emerald']}
+            showLegend={false}
+            showGridLines={false}
+            curveType="monotone"
+          />
+        </ChartCard>
+
+        {/* Deployments Chart */}
+        <ChartCard title="Deployments" subtitle="Success vs Failed - Last 30 days" className="lg:col-span-2">
+          <BarChart
+            className="h-72"
+            data={deploymentsData}
+            index="date"
+            categories={['Success', 'Failed']}
+            colors={['emerald', 'rose']}
+            stack={false}
+            showGridLines={false}
+          />
+        </ChartCard>
+      </div>
     </div>
   );
 }
 
-function RevenueTab({ metrics }: { metrics: RevenueMetrics | null }) {
+function RevenueTab({ metrics, chartData }: { metrics: RevenueMetrics | null; chartData: RevenueChartData | null }) {
   if (!metrics) {
     return (
       <div className="text-center py-20 text-gray-400">
@@ -319,11 +418,77 @@ function RevenueTab({ metrics }: { metrics: RevenueMetrics | null }) {
     { label: 'Daily Margin', value: `$${(metrics.dailyRevenue - metrics.dailyApiCost).toFixed(2)}`, icon: '📊', color: metrics.dailyRevenue - metrics.dailyApiCost >= 0 ? 'from-green-500 to-green-600' : 'from-red-500 to-red-600' },
   ];
 
+  // Transform chart data for Tremor
+  const revenueVsCostData = chartData?.revenueVsCost.map(d => ({
+    date: formatDate(d.date),
+    'Revenue': d.revenue,
+    'API Cost': d.cost,
+  })) || [];
+
+  const dailyPayersData = chartData?.dailyPayers.map(d => ({
+    date: formatDate(d.date),
+    'Payers': d.value,
+  })) || [];
+
+  // Calculate margin data
+  const marginData = chartData?.revenueVsCost.map(d => ({
+    date: formatDate(d.date),
+    'Margin': Math.round((d.revenue - d.cost) * 100) / 100,
+  })) || [];
+
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-      {cards.map((card, index) => (
-        <MetricCard key={index} {...card} />
-      ))}
+    <div className="space-y-8">
+      {/* Metric Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        {cards.map((card, index) => (
+          <MetricCard key={index} {...card} />
+        ))}
+      </div>
+
+      {/* Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Revenue vs Cost Chart */}
+        <ChartCard title="Revenue vs API Cost" subtitle="Last 30 days">
+          <LineChart
+            className="h-72"
+            data={revenueVsCostData}
+            index="date"
+            categories={['Revenue', 'API Cost']}
+            colors={['emerald', 'rose']}
+            showGridLines={false}
+            curveType="monotone"
+            valueFormatter={(v) => `$${v.toFixed(2)}`}
+          />
+        </ChartCard>
+
+        {/* Daily Payers Chart */}
+        <ChartCard title="Daily Paying Users" subtitle="Last 30 days">
+          <BarChart
+            className="h-72"
+            data={dailyPayersData}
+            index="date"
+            categories={['Payers']}
+            colors={['blue']}
+            showLegend={false}
+            showGridLines={false}
+          />
+        </ChartCard>
+
+        {/* Margin Trend Chart */}
+        <ChartCard title="Daily Margin Trend" subtitle="Revenue - API Cost" className="lg:col-span-2">
+          <AreaChart
+            className="h-72"
+            data={marginData}
+            index="date"
+            categories={['Margin']}
+            colors={['cyan']}
+            showLegend={false}
+            showGridLines={false}
+            curveType="monotone"
+            valueFormatter={(v) => `$${v.toFixed(2)}`}
+          />
+        </ChartCard>
+      </div>
     </div>
   );
 }
@@ -342,13 +507,13 @@ function MetricCard({
   subtitle?: string;
 }) {
   return (
-    <div className="bg-[#1a1a2e] rounded-2xl p-6 border border-[#2a2a4e] hover:border-[#3a3a5e] transition-all">
-      <div className="flex items-start justify-between mb-4">
-        <div className={`w-12 h-12 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center text-2xl`}>
+    <div className="bg-[#1a1a2e] rounded-2xl p-5 border border-[#2a2a4e] hover:border-[#3a3a5e] transition-all">
+      <div className="flex items-start justify-between mb-3">
+        <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${color} flex items-center justify-center text-xl`}>
           {icon}
         </div>
       </div>
-      <div className="text-3xl font-bold text-white mb-1">
+      <div className="text-2xl font-bold text-white mb-1">
         {typeof value === 'number' ? value.toLocaleString() : value}
       </div>
       <div className="text-gray-400 text-sm">{label}</div>
@@ -359,3 +524,29 @@ function MetricCard({
   );
 }
 
+function ChartCard({ 
+  title, 
+  subtitle, 
+  children, 
+  className = '' 
+}: { 
+  title: string; 
+  subtitle?: string; 
+  children: React.ReactNode;
+  className?: string;
+}) {
+  return (
+    <div className={`bg-[#1a1a2e] rounded-2xl p-6 border border-[#2a2a4e] ${className}`}>
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold text-white">{title}</h3>
+        {subtitle && <p className="text-sm text-gray-400">{subtitle}</p>}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function formatDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
