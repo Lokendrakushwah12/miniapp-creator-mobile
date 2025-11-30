@@ -3,7 +3,7 @@
     "name": "minidev",
     "version": "1",
     "iconUrl": "https://res.cloudinary.com/dzr8cn56i/image/upload/v1764182920/minidevFarcaster_w83k77.jpg",
-    "homeUrl": "https://miniapp.minidev.fun",
+    "homeUrl": "https://miniapp-creator-mobile-production.up.railway.app/",
     "webhookUrl": "https://api.neynar.com/f/app/b2be8eba-ee8d-4475-b5b5-ee312378ecf6/event",
     "description": "Minidev is an AI agent for building Farcaster mini apps, allowing non-technical creators to develop, edit, and launch web3 applications through natural language.",
     "primaryCategory": "productivity",
